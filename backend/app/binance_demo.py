@@ -320,7 +320,9 @@ class BinanceDemoClient:
                 break
             except httpx.RequestError as exc:
                 if attempt + 1 == attempts:
-                    raise BinanceDemoError("Binance Demo sunucusuna ulaşılamadı.") from exc
+                    raise BinanceDemoError(
+                        f"Binance Demo {method} {path} bağlantısı başarısız ({type(exc).__name__})."
+                    ) from exc
                 await asyncio.sleep(0.25)
 
         if response.status_code >= 400:
