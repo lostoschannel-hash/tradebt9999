@@ -398,6 +398,139 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 .webAccessIcon { border: 1px solid rgba(245,158,11,.35); color: var(--accent-strong); }
 .webAccessCard footer { background: transparent; }
 
+/* Mobile-first stabilization layer. Desktop rules remain unchanged above. */
+@media (max-width: 900px) {
+  html, body, #root { width: 100%; min-width: 0; max-width: 100%; overflow-x: hidden; }
+  body { min-width: 0 !important; overflow-x: hidden; }
+  .v26App { width: 100%; max-width: 100%; min-width: 0; padding: 10px 10px calc(82px + env(safe-area-inset-bottom)); overflow-x: hidden; }
+  .v26Header { min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 58px; padding: 9px 10px; border-radius: 12px; }
+  .v26Brand { min-width: 0; flex: 1 1 auto; gap: 8px; }
+  .v26Brand > span { flex: 0 0 32px; width: 32px; height: 32px; font-size: 16px; border-radius: 8px; }
+  .v26Brand b { overflow: hidden; font-size: clamp(11px, 3.4vw, 16px); letter-spacing: .02em; text-overflow: ellipsis; white-space: nowrap; }
+  .v26Brand small { overflow: hidden; margin-top: 2px; font-size: 7px; letter-spacing: .08em; text-overflow: ellipsis; white-space: nowrap; }
+  .v26HeaderActions { flex: 0 0 auto; gap: 5px; margin-top: 0; }
+  .v26HeaderActions .v26SubscriptionBadge { display: none; }
+  .v26Refresh { width: 38px; min-height: 38px; padding: 0; font-size: 0; }
+  .v26Refresh svg { width: 17px; height: 17px; }
+  .v26NotificationButton { width: 38px; height: 38px; }
+  .v26Notifications { position: static; }
+  .v26NotificationPanel { position: fixed !important; z-index: 60; top: 66px !important; right: 10px !important; left: 10px !important; width: auto !important; max-height: min(70vh, 520px); overflow: auto; }
+  .v26Nav { position: relative !important; top: auto !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin-top: 8px; padding: 5px; border-radius: 12px; }
+  .v26Nav button { min-width: 0; min-height: 48px; gap: 7px; padding: 7px 8px; border-radius: 8px; }
+  .v26Nav button > svg { width: 17px; height: 17px; padding: 5px; border-radius: 6px; }
+  .v26Nav b { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  .v26Nav small { display: none; }
+  .v26ModeBar { display: grid; grid-template-columns: 1fr; gap: 10px; min-height: 0; margin-top: 8px; padding: 14px; border-radius: 12px; }
+  .v26ModeBar h1 { margin: 4px 0; font-size: 18px; line-height: 1.2; }
+  .v26ModeBar p { font-size: 10px; line-height: 1.45; }
+  .v26ModeBar aside { min-width: 0; width: 100%; grid-template-columns: 1fr auto; padding: 9px 10px; }
+  .v26ModeBar aside b { font-size: 16px; }
+  .v26MarketBar { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; padding: 8px; border-radius: 12px; }
+  .v26MarketTitle { min-width: 0; padding: 3px; }
+  .v26MarketTitle b { font-size: 14px; }
+  .v26MarketTitle strong { margin-left: auto; }
+  .v26MarketPicker { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+  .v26MarketPicker button { min-height: 48px; padding: 6px; }
+  .v26MarketPicker b { overflow: hidden; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+  .v26Intervals { grid-column: auto; display: grid; grid-template-columns: repeat(5, 1fr); padding: 2px; }
+  .v26Intervals button { width: auto; min-height: 34px; }
+  .v26App .binanceDemoDeck { gap: 8px; margin-top: 8px; min-width: 0; }
+  .demoCommandBar { grid-template-columns: 1fr 1fr; gap: 6px; padding: 7px; }
+  .demoCommandBar > button { min-width: 0; min-height: 44px; padding: 9px 6px; font-size: 8px; }
+  .demoCommandBar > label { grid-column: 1 / -1; min-width: 0; min-height: 44px; grid-template-columns: minmax(0, 1fr) 110px; }
+  .demoCommandBar > div { grid-column: 1 / -1; min-width: 0; }
+  .demoAccountStrip { grid-template-columns: repeat(2, minmax(0, 1fr)); border-radius: 10px; }
+  .demoAccountStrip article { min-width: 0; min-height: 67px; padding: 9px; gap: 7px; }
+  .demoAccountStrip article:nth-child(odd) { border-right: 1px solid var(--border); }
+  .demoAccountStrip article:nth-child(even) { border-right: 0; }
+  .demoAccountStrip svg { width: 16px; height: 16px; padding: 5px; }
+  .demoAccountStrip b { overflow-wrap: anywhere; font-size: 11px; }
+  .demoMainGrid, .demoOrdersGrid, .executionColumns, .executionColumns.lower, .v27Grid, .v21RiskLayout, .v21JournalGrid, .v21AutoLayout, .v21BacktestLayout, .v21CertificateLayout { grid-template-columns: 1fr; gap: 8px; }
+  .demoLiveChart, .demoTicket, .demoPositions, .demoOrderPanel, .demoEventPanel, .executionCard, .v27Panel, .v21Card, .v21Workspace { min-width: 0; padding: 11px; border-radius: 10px; }
+  .demoChartCanvas, .v26ChartShell { min-height: 300px; height: 300px; }
+  .v26Chart { min-height: 300px; height: 300px; }
+  .demoFieldGrid, .executionFields { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .demoFieldGrid label, .executionFields label { min-width: 0; }
+  .demoFieldGrid input, .demoFieldGrid select, .executionFields input, .executionFields select { min-height: 42px; padding: 9px 8px; font-size: 12px; }
+  .demoExposure { grid-template-columns: 1fr 1fr; }
+  .demoExposure span { min-width: 0; overflow-wrap: anywhere; }
+  .demoPositionMetrics, .accountMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .demoPositionList > article > header { align-items: flex-start; flex-wrap: wrap; }
+  .demoPositionMap { overflow: hidden; }
+  .demoMapRail { margin: 0 10px; }
+  .executionHero, .v27OpsHero, .v21WorkspaceHead { display: grid; grid-template-columns: 1fr; gap: 10px; padding: 13px; }
+  .executionHero aside { min-width: 0; }
+  .executionPulse, .v27Pulse, .v27Metrics, .v21Pulse { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .executionPulse article, .v27Pulse article, .v27Metrics article { min-width: 0; min-height: 78px; padding: 10px; }
+  .v21Tabs { position: relative; top: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; padding: 5px; }
+  .v21Tabs button { min-height: 43px; padding: 7px; }
+  .v21Tabs small { display: none; }
+  .v21SettingsGrid, .v21AutoRules > div, .v21GateStrip, .v21BacktestMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .v21ScannerMetrics, .v21ScannerCards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .v21ScannerHeader { align-items: flex-start; flex-direction: column; padding: 12px; }
+  .v21Timeline > div, .v21ExchangeHistory > div, .v21TradeResults > div { max-height: none; }
+  .connectionCenter { width: 100%; margin-top: 8px; gap: 8px; }
+  .connectionCenterHeader { grid-template-columns: 1fr; gap: 12px; padding: 15px; }
+  .connectionCenterHeader h2 { font-size: 22px; }
+  .connectionHeaderStatus { min-width: 0; padding: 10px 0 0; border-top: 1px solid var(--border); border-left: 0; }
+  .connectionStatusRail { grid-template-columns: 1fr 1fr; }
+  .connectionStatusRail > div { min-width: 0; min-height: 64px; padding: 10px; }
+  .connectionStatusRail > div:nth-child(2) { border-right: 0; }
+  .connectionStatusRail > div:nth-child(3) { border-top: 1px solid var(--border); }
+  .connectionStatusRail button { grid-column: 2; grid-row: 2; justify-self: end; width: 38px; height: 38px; margin: 8px; }
+  .connectionWorkflow { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+  .connectionWorkflow span { min-width: 0; padding: 9px; }
+  .connectionWorkflow small { overflow-wrap: anywhere; font-size: 8px; }
+  .connectionDemoPanel, .connectionLivePanel, .connectionSecurityPanel { padding: 14px; }
+  .connectionDemoPanel > header, .connectionLivePanel > header, .connectionSecurityPanel > header { display: grid; gap: 9px; }
+  .connectionFormGrid, .connectionLiveGrid, .connectionSecurityPanel > div { grid-template-columns: 1fr; gap: 9px; }
+  .connectionActions { display: grid; }
+  .connectionActions button { width: 100%; min-height: 46px; }
+  .connectionSecurityPanel > div span { font-size: 10px; }
+  .v26Footer { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 8px; padding: 10px; font-size: 8px; }
+  .v26Footer em { grid-column: 1 / -1; margin-left: 0; text-align: left; }
+  .terminalMobileNav { right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); left: 8px; z-index: 50; min-height: 58px; padding: 5px; border-radius: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .terminalMobileNavHidden { transform: none; opacity: 1; pointer-events: auto; }
+  .terminalMobileNav button { min-width: 0; min-height: 48px; gap: 3px; padding: 5px 2px; font-size: 9px; }
+  .terminalMobileNav button svg { width: 17px; height: 17px; }
+  table { display: block; max-width: 100%; overflow-x: auto; white-space: nowrap; }
+  img, svg, canvas { max-width: 100%; }
+  button, input, select, textarea { touch-action: manipulation; }
+}
+
+@media (max-width: 430px) {
+  .v26App { padding-right: 7px; padding-left: 7px; }
+  .v26Header { padding-right: 7px; padding-left: 7px; }
+  .v26Brand b { font-size: 12px; }
+  .v26Brand small { font-size: 6px; }
+  .v26MarketPicker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .demoCommandBar { grid-template-columns: 1fr; }
+  .demoCommandBar > label, .demoCommandBar > div { grid-column: auto; }
+  .demoCommandBar > label { grid-template-columns: minmax(0, 1fr) 105px; }
+  .demoFieldGrid, .executionFields { grid-template-columns: 1fr; }
+  .executionActionBar { grid-template-columns: 1fr; }
+  .v21ScannerMetrics, .v21ScannerCards { grid-template-columns: 1fr; }
+  .v21Pulse, .v27Pulse, .v27Metrics, .executionPulse { grid-template-columns: 1fr 1fr; }
+  .connectionStatusRail strong { font-size: 9px; }
+  .connectionWorkflow small { font-size: 7px; }
+}
+
+@media (max-width: 360px) {
+  .v26Brand > span { flex-basis: 28px; width: 28px; height: 28px; font-size: 14px; }
+  .v26Brand b { font-size: 11px; }
+  .v26HeaderActions .v26NotificationButton, .v26Refresh { width: 34px; height: 34px; min-height: 34px; }
+  .v26Nav b { font-size: 8px; }
+  .v26ModeBar h1 { font-size: 16px; }
+  .v26MarketTitle b { font-size: 13px; }
+  .terminalMobileNav button { font-size: 8px; }
+}
+
+@media (max-width: 640px) {
+  /* Keep the full desktop navigation available at tablet widths while the
+     existing four-item bottom navigation owns phone navigation. */
+  .v26Nav { display: none; }
+}
+
 /* Professional terminal layer: presentation-only overrides for the active root UI. */
 .v26App { background: var(--app-bg); }
 .v26Header, .v26Nav, .v26ModeBar, .v26MarketBar, .v21Tabs, .v21Pulse, .v21DashboardHome > *, .executionCard, .executionHero, .executionPulse, .executionActionArea, .v27OpsHero, .v27Pulse, .v27Metrics, .v27Panel { border-color: rgba(71, 85, 105, .72); }
@@ -2403,4 +2536,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   .executionEvents article { grid-template-columns: 8px minmax(0,1fr); }
   .demoEventPanel article time,
   .executionEvents article time { grid-column: 2; }
+}
+
+/* Keep mobile navigation visible after the existing scroll-hide rule. */
+@media (max-width: 900px) {
+  .terminalMobileNavHidden { transform: none !important; opacity: 1 !important; pointer-events: auto !important; }
+  .v26HeaderActions .v26NotificationButton { display: grid; }
 }
