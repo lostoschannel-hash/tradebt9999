@@ -42,6 +42,9 @@ ARM_SECONDS = 10 * 60
 CLIENT_PREFIX = "PTB_"
 logger = logging.getLogger(__name__)
 DEMO_SNAPSHOT_LOCK = asyncio.Lock()
+DEMO_CLOCK_LOCK = asyncio.Lock()
+DEMO_CLOCK_OFFSET_MS = 0
+DEMO_CLOCK_SYNCED_AT = 0.0
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 ENV_PATH = BACKEND_ROOT / ".env"
@@ -255,17 +258,28 @@ class BinanceDemoClient:
         return await self._request("GET", path, params or {}, signed=False)
 
     async def sync_clock(self, *, force: bool = False) -> None:
-        if not force and time.monotonic() - self.last_time_sync < 30:
+        global DEMO_CLOCK_OFFSET_MS, DEMO_CLOCK_SYNCED_AT
+        request_started = time.monotonic()
+        if not force and request_started - DEMO_CLOCK_SYNCED_AT < 30:
+            self.time_offset_ms = DEMO_CLOCK_OFFSET_MS
+            self.last_time_sync = DEMO_CLOCK_SYNCED_AT
             return
-        async with self._clock_lock:
-            if not force and time.monotonic() - self.last_time_sync < 30:
+        async with DEMO_CLOCK_LOCK:
+            if (
+                (not force and time.monotonic() - DEMO_CLOCK_SYNCED_AT < 30)
+                or (force and DEMO_CLOCK_SYNCED_AT > request_started)
+            ):
+                self.time_offset_ms = DEMO_CLOCK_OFFSET_MS
+                self.last_time_sync = DEMO_CLOCK_SYNCED_AT
                 return
             before = int(time.time() * 1000)
             payload = await self.public_get("/fapi/v1/time")
             after = int(time.time() * 1000)
             server_time = int(payload["serverTime"])
-            self.time_offset_ms = server_time - ((before + after) // 2)
-            self.last_time_sync = time.monotonic()
+            DEMO_CLOCK_OFFSET_MS = server_time - ((before + after) // 2)
+            DEMO_CLOCK_SYNCED_AT = time.monotonic()
+            self.time_offset_ms = DEMO_CLOCK_OFFSET_MS
+            self.last_time_sync = DEMO_CLOCK_SYNCED_AT
 
     async def signed(self, method: str, path: str, params: dict[str, Any] | None = None) -> Any:
         method = method.upper()

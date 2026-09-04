@@ -220,6 +220,12 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         self.assertIn("await client.sync_clock(force=True)", SOURCE_TEXT)
         self.assertIn("snapshot = await connect_snapshot(client)", SOURCE_TEXT)
 
+    def test_clock_sync_is_process_serialized_and_shared(self):
+        self.assertIn("DEMO_CLOCK_LOCK = asyncio.Lock()", SOURCE_TEXT)
+        self.assertIn("DEMO_CLOCK_OFFSET_MS = 0", SOURCE_TEXT)
+        self.assertIn("async with DEMO_CLOCK_LOCK", SOURCE_TEXT)
+        self.assertIn("DEMO_CLOCK_SYNCED_AT > request_started", SOURCE_TEXT)
+
     def test_position_lifecycle_tracks_partial_targets_and_full_close(self):
         lifecycle = CORE["update_position_lifecycle"]
         plan = {"position_id": "demo-123", "initial_quantity": "10", "quantity": "10"}
