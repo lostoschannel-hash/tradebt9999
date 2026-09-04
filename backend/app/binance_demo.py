@@ -566,12 +566,20 @@ async def optional_symbol_configurations(client: BinanceDemoClient) -> Any:
         return []
 
 
+async def optional_open_algo_orders(client: BinanceDemoClient) -> Any:
+    """Keep account/ARM snapshots usable when Demo omits the algo-order read endpoint."""
+    try:
+        return await client.signed("GET", "/fapi/v1/openAlgoOrders")
+    except BinanceDemoError:
+        return []
+
+
 async def account_snapshot(client: BinanceDemoClient) -> dict[str, Any]:
     account, positions, orders, algo_orders, hedge_mode, configurations = await asyncio.gather(
         client.signed("GET", "/fapi/v3/account"),
         client.signed("GET", "/fapi/v3/positionRisk"),
         client.signed("GET", "/fapi/v1/openOrders"),
-        client.signed("GET", "/fapi/v1/openAlgoOrders"),
+        optional_open_algo_orders(client),
         position_mode(client),
         optional_symbol_configurations(client),
     )
