@@ -675,6 +675,17 @@ async def _account_snapshot(client: BinanceDemoClient) -> dict[str, Any]:
     }
 
 
+async def connect_snapshot(client: BinanceDemoClient) -> dict[str, Any]:
+    """Retry only the read-only CONNECT snapshot after a Binance clock rejection."""
+    try:
+        return await account_snapshot(client)
+    except BinanceDemoError as exc:
+        if exc.exchange_code != -1021:
+            raise
+        await client.sync_clock(force=True)
+        return await account_snapshot(client)
+
+
 def enrich_snapshot_with_plans(snapshot: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     """Add the local request audit without inventing missing exchange values."""
     plans = list(state.get("plans", {}).values())
@@ -1223,7 +1234,7 @@ async def demo_connect(request: Request) -> dict[str, Any]:
     state = state_for(request)
     try:
         client = client_for(request)
-        snapshot = await account_snapshot(client)
+        snapshot = await connect_snapshot(client)
         reconciliation = reconcile_demo_plans(state, snapshot)
         if reconciliation["changed"]:
             persist_runtime(state)

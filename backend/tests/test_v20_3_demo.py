@@ -214,6 +214,12 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         self.assertIn('if method != "GET" or exc.exchange_code != -1021', SOURCE_TEXT)
         self.assertIn("origClientOrderId", SOURCE_TEXT)
 
+    def test_connect_only_resyncs_after_timestamp_rejection(self):
+        self.assertIn("async def connect_snapshot", SOURCE_TEXT)
+        self.assertIn("if exc.exchange_code != -1021", SOURCE_TEXT)
+        self.assertIn("await client.sync_clock(force=True)", SOURCE_TEXT)
+        self.assertIn("snapshot = await connect_snapshot(client)", SOURCE_TEXT)
+
     def test_position_lifecycle_tracks_partial_targets_and_full_close(self):
         lifecycle = CORE["update_position_lifecycle"]
         plan = {"position_id": "demo-123", "initial_quantity": "10", "quantity": "10"}
