@@ -1,5 +1,5 @@
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, BarChart3, Bell, Calculator, CheckCircle2, ChevronDown, CircleDollarSign, ClipboardList, Crosshair, Gauge, History, LayoutDashboard, LockKeyhole, Play, Radar, Radio, RefreshCw, Save, Search, Send, Settings2, ShieldCheck, Target, TestTube2, TriangleAlert, UnlockKeyhole, Wallet, X, Zap } from 'lucide-react'
+import { Activity, BarChart3, Bell, Calculator, CheckCircle2, ChevronDown, CircleDollarSign, ClipboardList, Crosshair, Gauge, History, LayoutDashboard, LockKeyhole, Play, Radar, Radio, RefreshCw, Save, Search, Send, Settings2, ShieldCheck, Sparkles, Target, TestTube2, TriangleAlert, UnlockKeyhole, Wallet, X, Zap } from 'lucide-react'
 import { API_BASE } from './api'
 
 const API = `${API_BASE}/binance-demo`
