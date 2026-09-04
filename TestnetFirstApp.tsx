@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { CandlestickSeries, ColorType, createChart, HistogramSeries, LineSeries, type IPriceLine } from 'lightweight-charts'
-import { Activity, ArrowUp, Bell, CheckCircle2, CircleDollarSign, Cloud, CloudCog, KeyRound, LockKeyhole, RadioTower, RefreshCw, Save, ShieldCheck, Sparkles, TestTube2 } from 'lucide-react'
+import { Activity, ArrowUp, Bell, CheckCircle2, CircleDollarSign, Cloud, CloudCog, KeyRound, LockKeyhole, Menu, RadioTower, RefreshCw, Save, ShieldCheck, Sparkles, TestTube2, X } from 'lucide-react'
 import { API_BASE } from './api'
 import CoinAnalysisCenter from './CoinAnalysisCenter'
 
@@ -145,11 +145,13 @@ export default function TestnetFirstApp() {
   const [notificationsOpen,setNotificationsOpen] = useState(false)
   const [headerHidden,setHeaderHidden] = useState(false)
   const [showBackToTop,setShowBackToTop] = useState(false)
+  const [mobileMenuOpen,setMobileMenuOpen] = useState(false)
   const notificationRef = useRef<HTMLDivElement>(null)
   const notifications = healthNotifications(health)
 
   const navigate = (target:View) => {
     setView(target)
+    setMobileMenuOpen(false)
     if (target === 'pricing' || target === 'billing') window.history.pushState({},'',`/${target}`)
     else if (window.location.pathname === '/pricing' || window.location.pathname === '/billing') window.history.pushState({},'', '/')
   }
@@ -273,6 +275,7 @@ export default function TestnetFirstApp() {
       <div className="v26HeaderActions">
         <button className="v26SubscriptionBadge" onClick={() => navigate('billing')}><Sparkles/> PLANS &amp; BILLING</button>
         <button className="v26Refresh" onClick={refresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/>{loading ? 'YENİLENİYOR' : 'YENİLE'}</button>
+        <button className="mobileMenuButton" type="button" aria-label={mobileMenuOpen ? 'Menüyü kapat' : 'Menüyü aç'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(open => !open)}>{mobileMenuOpen ? <X/> : <Menu/>}</button>
         <div className="v26Notifications" ref={notificationRef}>
           <button className="v26NotificationButton" type="button" aria-label="Notifications" aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen(open => !open)}><Bell/></button>
           {notificationsOpen && <section className="v26NotificationPanel" role="dialog" aria-label="Notifications">
@@ -289,6 +292,7 @@ export default function TestnetFirstApp() {
       <button className={view === 'live' ? 'active liveTab' : ''} onClick={() => setView('live')}><ShieldCheck/><span><b>CANLI HAZIRLIK</b><small>API yoksa kesin kilitli · Gerçek kanal</small></span></button>
       <button className={view === 'setup' ? 'active' : ''} onClick={() => setView('setup')}><CloudCog/><span><b>YAYIN KAPILARI</b><small>Render secret ve geçiş kontrolü</small></span></button>
     </nav>
+    {mobileMenuOpen && <div className="mobileMenuBackdrop" role="presentation" onClick={event => { if (event.target === event.currentTarget) setMobileMenuOpen(false) }}><aside className="mobileMenuDrawer" role="dialog" aria-modal="true" aria-label="Mobil menü"><header><div><small>PROTREBOT ELITE X</small><b>Workspace</b></div><button type="button" aria-label="Menüyü kapat" onClick={() => setMobileMenuOpen(false)}><X/></button></header><button onClick={() => navigate('testnet')}><TestTube2/><span><b>Dashboard</b><small>Demo command center</small></span></button><button onClick={() => navigate('ops')}><Cloud/><span><b>Operasyon</b><small>Evidence and cloud ops</small></span></button><button onClick={() => navigate('live')}><ShieldCheck/><span><b>Canlı</b><small>Fail-closed live gates</small></span></button><button onClick={() => navigate('setup')}><CloudCog/><span><b>Ayarlar</b><small>API connections</small></span></button><button onClick={() => navigate('billing')}><Sparkles/><span><b>Billing</b><small>Subscription workspace</small></span></button></aside></div>}
 
     <section className="v26ModeBar">
       <div><small>AKTİF ÇALIŞMA ALANI</small><h1>{view === 'testnet' ? 'Binance Futures Demo Merkezi' : view === 'ops' ? 'Bulut Operasyon ve Kanıt Merkezi' : view === 'live' ? 'Gerçek Futures Hazırlık Merkezi' : view === 'pricing' ? 'Plans & Pricing' : view === 'billing' ? 'Billing & Subscription' : 'Sunucu ve Anahtar Kapıları'}</h1><p>{view === 'testnet' ? 'Gerçek Binance motoruna en yakın test ortamı; sanal bakiye, gerçek emir akışı ve borsa yanıtları.' : view === 'ops' ? 'Otonom taramanın son kararı, pozisyonlar ve yeniden başlatmaya dayanıklı PostgreSQL kanıt defteri.' : view === 'live' ? 'Şifreli canlı kasa kaydı ve tüm risk kapıları tamamlanana kadar emir gönderimi fail-closed olarak kilitli.' : view === 'pricing' || view === 'billing' ? 'Choose a subscription level for your trading intelligence workspace.' : 'Anahtar değerleri tarayıcıya veya GitHub’a yazılmaz; yalnızca sunucu tarafındaki şifreli kasa veya güvenli geçiş değişkenlerinde tutulur.'}</p></div>

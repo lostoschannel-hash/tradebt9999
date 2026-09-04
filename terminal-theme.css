@@ -415,6 +415,20 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   .v26NotificationButton { width: 38px; height: 38px; }
   .v26Notifications { position: static; }
   .v26NotificationPanel { position: fixed !important; z-index: 60; top: 66px !important; right: 10px !important; left: 10px !important; width: auto !important; max-height: min(70vh, 520px); overflow: auto; }
+  .mobileMenuButton { display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-3); color: var(--text); }
+  .mobileMenuButton svg { width: 18px; height: 18px; }
+  .mobileMenuBackdrop { position: fixed; z-index: 70; inset: 0; background: rgba(2,6,10,.68); }
+  .mobileMenuDrawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(320px, 88vw); display: flex; flex-direction: column; gap: 7px; padding: 16px 12px calc(18px + env(safe-area-inset-bottom)); border-left: 1px solid var(--border-strong); background: var(--surface-2); box-shadow: -18px 0 45px rgba(0,0,0,.3); }
+  .mobileMenuDrawer header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 4px 14px; border-bottom: 1px solid var(--border); }
+  .mobileMenuDrawer header small, .mobileMenuDrawer header b { display: block; }
+  .mobileMenuDrawer header small { color: var(--info); font-size: 9px; letter-spacing: .12em; }
+  .mobileMenuDrawer header b { margin-top: 4px; color: var(--text-primary); font-size: 18px; }
+  .mobileMenuDrawer header button { display: grid; place-items: center; width: 38px; height: 38px; padding: 0; }
+  .mobileMenuDrawer > button { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 9px; text-align: left; }
+  .mobileMenuDrawer > button svg { width: 18px; height: 18px; color: var(--accent-strong); }
+  .mobileMenuDrawer > button span, .mobileMenuDrawer > button b, .mobileMenuDrawer > button small { display: block; min-width: 0; }
+  .mobileMenuDrawer > button b { color: var(--text-primary); font-size: 12px; }
+  .mobileMenuDrawer > button small { margin-top: 3px; color: var(--text-muted); font-size: 10px; }
   .v26Nav { position: relative !important; top: auto !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin-top: 8px; padding: 5px; border-radius: 12px; }
   .v26Nav button { min-width: 0; min-height: 48px; gap: 7px; padding: 7px 8px; border-radius: 8px; }
   .v26Nav button > svg { width: 17px; height: 17px; padding: 5px; border-radius: 6px; }
@@ -497,6 +511,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   img, svg, canvas { max-width: 100%; }
   button, input, select, textarea { touch-action: manipulation; }
 }
+
+@media (min-width: 901px) { .mobileMenuButton, .mobileMenuBackdrop { display: none; } }
 
 @media (max-width: 430px) {
   .v26App { padding-right: 7px; padding-left: 7px; }
