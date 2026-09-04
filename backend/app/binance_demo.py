@@ -307,10 +307,21 @@ class BinanceDemoClient:
             raise BinanceDemoError("Demo sunucu kilidi doğrulanamadı.", http_status=500)
         headers = {"X-MBX-APIKEY": self.api_key} if signed or api_key_header else {}
         request_url = f"{url}?{encoded_query}&signature={signature}" if signed else url
-        try:
-            response = await self.http.request(method, request_url, params=None if signed else params, headers=headers)
-        except httpx.RequestError as exc:
-            raise BinanceDemoError("Binance Demo sunucusuna ulaşılamadı.") from exc
+        attempts = 2 if method == "GET" and (method, path) in PRIVATE_PATHS else 1
+        for attempt in range(attempts):
+            try:
+                response = await self.http.request(
+                    method,
+                    request_url,
+                    params=None if signed else params,
+                    headers=headers,
+                    timeout=30,
+                )
+                break
+            except httpx.RequestError as exc:
+                if attempt + 1 == attempts:
+                    raise BinanceDemoError("Binance Demo sunucusuna ulaşılamadı.") from exc
+                await asyncio.sleep(0.25)
 
         if response.status_code >= 400:
             try:
