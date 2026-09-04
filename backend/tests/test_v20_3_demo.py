@@ -210,7 +210,8 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
     def test_entry_post_is_not_blindly_retried_on_unknown_status(self):
         self.assertIn("unknown_execution", SOURCE_TEXT)
         self.assertIn("find_order_by_client_id", SOURCE_TEXT)
-        self.assertNotIn("for attempt in", SOURCE_TEXT)
+        self.assertIn('for attempt in range(2 if method == "GET" else 1)', SOURCE_TEXT)
+        self.assertIn('if method != "GET" or exc.exchange_code != -1021', SOURCE_TEXT)
         self.assertIn("origClientOrderId", SOURCE_TEXT)
 
     def test_position_lifecycle_tracks_partial_targets_and_full_close(self):

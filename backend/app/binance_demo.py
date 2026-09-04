@@ -253,11 +253,11 @@ class BinanceDemoClient:
             raise BinanceDemoError("İzin verilmeyen Demo API yolu.", http_status=500)
         return await self._request("GET", path, params or {}, signed=False)
 
-    async def sync_clock(self) -> None:
-        if time.monotonic() - self.last_time_sync < 30:
+    async def sync_clock(self, *, force: bool = False) -> None:
+        if not force and time.monotonic() - self.last_time_sync < 30:
             return
         async with self._clock_lock:
-            if time.monotonic() - self.last_time_sync < 30:
+            if not force and time.monotonic() - self.last_time_sync < 30:
                 return
             before = int(time.time() * 1000)
             payload = await self.public_get("/fapi/v1/time")
@@ -270,19 +270,25 @@ class BinanceDemoClient:
         method = method.upper()
         if (method, path) not in PRIVATE_PATHS:
             raise BinanceDemoError("İzin verilmeyen özel Demo API işlemi.", http_status=500)
-        await self.sync_clock()
-        payload = dict(params or {})
-        payload["timestamp"] = int(time.time() * 1000) + self.time_offset_ms
-        payload["recvWindow"] = 5000
-        query, signature = signed_query(self.secret_key, payload)
-        return await self._request(
-            method,
-            path,
-            payload,
-            signed=True,
-            encoded_query=query,
-            signature=signature,
-        )
+        for attempt in range(2 if method == "GET" else 1):
+            await self.sync_clock(force=attempt == 1)
+            payload = dict(params or {})
+            payload["timestamp"] = int(time.time() * 1000) + self.time_offset_ms
+            payload["recvWindow"] = 60000
+            query, signature = signed_query(self.secret_key, payload)
+            try:
+                return await self._request(
+                    method,
+                    path,
+                    payload,
+                    signed=True,
+                    encoded_query=query,
+                    signature=signature,
+                )
+            except BinanceDemoError as exc:
+                if method != "GET" or exc.exchange_code != -1021 or attempt == 1:
+                    raise
+        raise BinanceDemoError("Binance Demo zaman senkronizasyonu başarısız oldu.", http_status=502)
 
     async def api_key_request(self, method: str, path: str) -> Any:
         """Call a USER_STREAM endpoint with the API key but without a signature."""
