@@ -41,6 +41,7 @@ MAX_OPEN_POSITIONS = 3
 ARM_SECONDS = 10 * 60
 CLIENT_PREFIX = "PTB_"
 logger = logging.getLogger(__name__)
+DEMO_SNAPSHOT_LOCK = asyncio.Lock()
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 ENV_PATH = BACKEND_ROOT / ".env"
@@ -583,6 +584,11 @@ async def optional_open_algo_orders(client: BinanceDemoClient) -> Any:
 
 
 async def account_snapshot(client: BinanceDemoClient) -> dict[str, Any]:
+    async with DEMO_SNAPSHOT_LOCK:
+        return await _account_snapshot(client)
+
+
+async def _account_snapshot(client: BinanceDemoClient) -> dict[str, Any]:
     account, positions, orders, algo_orders, hedge_mode, configurations = await asyncio.gather(
         client.signed("GET", "/fapi/v3/account"),
         client.signed("GET", "/fapi/v3/positionRisk"),

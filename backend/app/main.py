@@ -575,7 +575,11 @@ async def lifespan(app: FastAPI):
     # Exchange signatures and API-key traffic must not silently inherit an
     # unrelated system proxy. This also avoids optional SOCKS dependencies
     # preventing the local API from starting.
-    app.state.http = httpx.AsyncClient(timeout=15, trust_env=False)
+    app.state.http = httpx.AsyncClient(
+        timeout=httpx.Timeout(30, connect=10, read=30, write=10, pool=30),
+        limits=httpx.Limits(max_connections=40, max_keepalive_connections=20, keepalive_expiry=30),
+        trust_env=False,
+    )
     app.state.db_pool = None
     app.state.redis_client = None
     app.state.paper_schema_ready = False

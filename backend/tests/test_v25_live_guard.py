@@ -226,7 +226,8 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
 
     def test_v25_router_and_frontend_center_are_integrated(self):
         self.assertIn('version="25.0.0"', MAIN_SOURCE)
-        self.assertIn("httpx.AsyncClient(timeout=15, trust_env=False)", MAIN_SOURCE)
+        self.assertIn("httpx.Timeout(30, connect=10, read=30, write=10, pool=30)", MAIN_SOURCE)
+        self.assertIn("max_connections=40", MAIN_SOURCE)
         self.assertIn("v25_execution_router", MAIN_SOURCE)
         for route in ('"/connect/read-only"', '"/market/candles"', '"/policy"', '"/order/test"', '"/arm"', '"/order"', '"/auto/start"', '"/emergency"'):
             self.assertIn(route, EXECUTION_SOURCE)
