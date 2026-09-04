@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -18,15 +19,16 @@ ROOT_FRONTEND = Path(__file__).parents[2] / "BinanceDemo.tsx"
 
 class V21ScannerDashboardTests(unittest.TestCase):
     def test_manual_leverage_choices_are_bounded_and_default_ui_is_10x(self):
-        for leverage in (1, 2, 3, 5, 10):
+        for leverage in (1, 2, 3, 5, 10, 20, 30, 40, 50):
             body = DemoOrderRequest(symbol="BTCUSDT", direction="LONG", margin_usdt=5, leverage=leverage, stop_loss=99, tp1=101, tp2=102, tp3=103)
             self.assertEqual(body.leverage, leverage)
         with self.assertRaises(ValueError):
-            DemoOrderRequest(symbol="BTCUSDT", direction="LONG", margin_usdt=5, leverage=11, stop_loss=99, tp1=101, tp2=102, tp3=103)
-        self.assertEqual(MANUAL_MAX_LEVERAGE, 10)
+            DemoOrderRequest(symbol="BTCUSDT", direction="LONG", margin_usdt=5, leverage=51, stop_loss=99, tp1=101, tp2=102, tp3=103)
+        self.assertEqual(MANUAL_MAX_LEVERAGE, 50)
         source = ROOT_FRONTEND.read_text(encoding="utf-8")
         self.assertIn("leverage:'10'", source)
-        self.assertIn("['AUTO','1','2','3','5','10']", source)
+        self.assertIn("['AUTO','1','2','3','5','10','15','20','25','30','40','50','CUSTOM']", source)
+        self.assertIn("customLeverage", source)
 
     def test_manual_long_and_short_leverage_payloads_keep_notional_cap(self):
         settings = dict(v21_demo.DEFAULT_SETTINGS)
@@ -37,6 +39,13 @@ class V21ScannerDashboardTests(unittest.TestCase):
         self.assertEqual(float(MAX_NOTIONAL_USDT), 200.0)
         with self.assertRaises(BinanceDemoError):
             validate_entry_risk(snapshot, DemoOrderRequest(symbol="BTCUSDT", direction="LONG", margin_usdt=20, leverage=10, stop_loss=99, tp1=101, tp2=102, tp3=103), {"notional_usdt": 201, "current_price": 100, "stop_loss": "99"}, settings, daily_realized_pnl=0)
+
+    def test_order_desk_uses_real_symbol_source_and_selected_analysis_endpoint(self):
+        source = ROOT_FRONTEND.read_text(encoding="utf-8")
+        self.assertIn("markets:MarketOption[]", source)
+        self.assertIn("onSymbolChange", source)
+        self.assertIn("/analysis/${symbol}?interval=15m", source)
+        self.assertNotIn("/analysis/BTCUSDT?interval=15m", source)
 
     def test_root_frontend_arm_uses_user_confirmation(self):
         source = ROOT_FRONTEND.read_text(encoding="utf-8")
@@ -61,9 +70,10 @@ class V21ScannerDashboardTests(unittest.TestCase):
 
     def test_unverified_close_and_unrealized_pnl_are_excluded_from_daily_metrics(self):
         state = v21_demo.initial_state()
+        current_day = datetime.now(timezone.utc).date().isoformat()
         state["journal"] = [
-            {"kind": "POSITION_MISSING", "created_at": "2026-09-02T10:00:00+00:00", "realized_pnl": 99.0},
-            {"kind": "FILL", "created_at": "2026-09-02T10:01:00+00:00", "realized_pnl": 4.0, "verified_realized": True},
+            {"kind": "POSITION_MISSING", "created_at": f"{current_day}T10:00:00+00:00", "realized_pnl": 99.0},
+            {"kind": "FILL", "created_at": f"{current_day}T10:01:00+00:00", "realized_pnl": 4.0, "verified_realized": True},
         ]
         self.assertEqual(v21_demo.daily_metrics(state)["realized_pnl"], 4.0)
 

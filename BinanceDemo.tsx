@@ -1,5 +1,5 @@
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, BarChart3, Bell, Calculator, CheckCircle2, CircleDollarSign, ClipboardList, Crosshair, Gauge, History, LayoutDashboard, LockKeyhole, Play, Radar, Radio, RefreshCw, Save, Send, Settings2, ShieldCheck, Sparkles, Target, TestTube2, TriangleAlert, UnlockKeyhole, Wallet, Zap } from 'lucide-react'
+import { Activity, BarChart3, Bell, Calculator, CheckCircle2, ChevronDown, CircleDollarSign, ClipboardList, Crosshair, Gauge, History, LayoutDashboard, LockKeyhole, Play, Radar, Radio, RefreshCw, Save, Search, Send, Settings2, ShieldCheck, Target, TestTube2, TriangleAlert, UnlockKeyhole, Wallet, X, Zap } from 'lucide-react'
 import { API_BASE } from './api'
 
 const API = `${API_BASE}/binance-demo`
@@ -141,11 +141,14 @@ type DemoAccount = DemoStatus & {
   exchange_position_diagnostics?:{symbol:string;position_amount:string;exchange_actual_position:boolean}[]
 }
 
+type MarketOption = {symbol:string;display:string;price:number;change:number;volume:number}
+
 type FormState = {
   direction:'LONG'|'SHORT'
   orderType:'MARKET'|'LIMIT'
   margin:string
-  leverage:'AUTO'|'1'|'2'|'3'|'5'|'10'
+  leverage:'AUTO'|'1'|'2'|'3'|'5'|'10'|'15'|'20'|'25'|'30'|'40'|'50'|'CUSTOM'
+  customLeverage:string
   limitPrice:string
   stop:string
   tp1:string
@@ -181,10 +184,10 @@ type V21Performance = {period:string;total_trades:number;wins:number;losses:numb
 type V21Tab = 'dashboard'|'trade'|'risk'|'journal'|'auto'|'backtest'|'performance'|'certificate'
 
 const initialForm:FormState = {
-  direction:'LONG',orderType:'MARKET',margin:'50',leverage:'10',limitPrice:'',stop:'',tp1:'',tp2:'',tp3:'',
+  direction:'LONG',orderType:'MARKET',margin:'50',leverage:'10',customLeverage:'',limitPrice:'',stop:'',tp1:'',tp2:'',tp3:'',
 }
 
-const resolveLeverage = (choice:FormState['leverage']) => choice === 'AUTO' ? 2 : Number(choice)
+const resolveLeverage = (choice:FormState['leverage'],customLeverage='') => choice === 'AUTO' ? 2 : choice === 'CUSTOM' ? Number(customLeverage) : Number(choice)
 
 const fmt = (value?:number|null) => value === undefined || value === null || !Number.isFinite(value) ? '—' : value.toLocaleString('tr-TR',{maximumFractionDigits:value < 10 ? 5 : 2})
 const stamp = (value?:string|null) => value ? new Date(value).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—'
@@ -222,6 +225,7 @@ function apiErrorMessage(detail:unknown):string {
       const field = Array.isArray(row.loc) ? String(row.loc.at(-1) ?? '') : ''
       if (field === 'margin_usdt') return 'Marjin 5–100 USDT arasında olmalı.'
       if (field === 'leverage') return 'Kaldıraç AUTO, 1x, 2x, 3x, 5x veya 10x olabilir.'
+        if (field === 'leverage') return 'Kaldıraç AUTO, 1x-50x aralığında tam sayı veya CUSTOM olabilir.'
       if (['limit_price','stop_loss','tp1','tp2','tp3'].includes(field)) return `${fieldNames[field]} boş bırakılamaz ve 0’dan büyük olmalı.`
       const message = typeof row.msg === 'string' ? row.msg : 'Geçersiz değer'
       return `${fieldNames[field] || field || 'Alan'}: ${message}`
@@ -273,7 +277,7 @@ function PositionMap({position,plan}:{position:DemoPosition;plan?:DemoPlan}) {
   </div>
 }
 
-export default function BinanceDemo({active,symbol,analysis,chart}:{active:boolean;symbol:string;analysis:AnalysisPlan|null;chart?:ReactNode}) {
+export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymbolChange}:{active:boolean;symbol:string;analysis:AnalysisPlan|null;chart?:ReactNode;markets:MarketOption[];onSymbolChange:(symbol:string)=>void}) {
   const [status,setStatus] = useState<DemoStatus|null>(null)
   const [account,setAccount] = useState<DemoAccount|null>(null)
   const [form,setForm] = useState<FormState>(initialForm)
@@ -294,6 +298,8 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
   const [autoConfirm,setAutoConfirm] = useState('')
   const [backtestSymbol,setBacktestSymbol] = useState(symbol)
   const [lastOrder,setLastOrder] = useState<DemoOrderResult|null>(null)
+  const [symbolOpen,setSymbolOpen] = useState(false)
+  const [symbolQuery,setSymbolQuery] = useState('')
   const [scannerFocus,setScannerFocus] = useState<{symbol:string;direction:'LONG'|'SHORT'|'WAIT';score:number;trend:string;volume:string;momentum:string;confidence:number;risk:string;status:string} | null>(null)
   const [alertFilter,setAlertFilter] = useState<'ALL'|'CRITICAL'|'WARNING'|'INFO'>('ALL')
   const demoDeckRef = useRef<HTMLElement>(null)
@@ -425,7 +431,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
         if (!response.ok) throw new Error(apiErrorMessage(payload && typeof payload === 'object' && 'detail' in payload ? payload.detail : payload))
         plan = normalizeAnalysisPlan(payload)
       }
-      if (!plan || !['LONG','SHORT'].includes(plan.direction)) throw new Error('Yön belirlenemedi; mevcut yön korunuyor.')
+      if (!plan || !['LONG','SHORT'].includes(plan.direction)) throw new Error('Analysis unavailable for this symbol.')
       const levels = [plan.entry,plan.stop_loss,plan.tp1,plan.tp2,plan.tp3]
       if (levels.some(value => !Number.isFinite(value) || value <= 0)) throw new Error('Analiz planında geçerli giriş, Stop ve TP seviyeleri bulunamadı.')
       const ordered = plan.direction === 'LONG'
@@ -442,9 +448,9 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
 
   const payload = () => {
     const margin = numberValue(form.margin)
-    const leverage = resolveLeverage(form.leverage)
+    const leverage = resolveLeverage(form.leverage,form.customLeverage)
     if (!Number.isFinite(margin) || margin < 5 || margin > 100) throw new Error('Demo marjini 5–100 USDT arasında olmalı.')
-    if (![1,2,3,5,10].includes(leverage)) throw new Error('Geçersiz kaldıraç seçimi.')
+    if (!Number.isInteger(leverage) || leverage < 1 || leverage > 50) throw new Error('Kaldıraç 1x ile 50x arasında tam sayı olmalı.')
     const levels = {stop_loss:numberValue(form.stop),tp1:numberValue(form.tp1),tp2:numberValue(form.tp2),tp3:numberValue(form.tp3)}
     const missing = Object.entries(levels).filter(([,value]) => !Number.isFinite(value) || value <= 0).map(([key]) => fieldNames[key])
     if (missing.length) throw new Error(`${missing.join(', ')} alanlarını güncel analizden doldurun veya elle geçerli fiyat girin.`)
@@ -520,7 +526,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
   const calculateRisk = () => {
     if (!analysis || analysis.entry <= 0 || analysis.stop_loss <= 0) { setMessage('Önce seçili paritenin analiz planını bekleyin.');setMessageKind('error');return }
     setV21Busy(true)
-    v21Call<V21RiskPreview>('/risk/size',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,entry:analysis.entry,stop:analysis.stop_loss,max_loss_usdt:numberValue(riskLoss),leverage:resolveLeverage(form.leverage)})})
+    v21Call<V21RiskPreview>('/risk/size',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,entry:analysis.entry,stop:analysis.stop_loss,max_loss_usdt:numberValue(riskLoss),leverage:resolveLeverage(form.leverage,form.customLeverage)})})
       .then(payload => {setRiskPreview(payload);setMessage('Maksimum kayba göre Demo pozisyon boyutu hesaplandı.');setMessageKind('ok')})
       .catch(error => {setMessage(error instanceof Error ? error.message : 'Risk hesabı yapılamadı.');setMessageKind('error')})
       .finally(() => setV21Busy(false))
@@ -785,7 +791,8 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
   const healthScore = healthKnown.length ? Math.round(healthKnown.reduce((total,service) => total + (service.status === 'HEALTHY' ? 100 : service.status === 'DEGRADED' ? 60 : 0),0) / healthKnown.length) : null
   const overallHealth = healthScore === null ? 'UNKNOWN' : healthScore >= 90 ? 'OPERATIONAL' : healthScore >= 60 ? 'DEGRADED' : 'LIMITED'
   const systemEvents = [...(status?.events || []).map(event => ({kind:'INFO',title:event.kind,detail:event.message,time:event.created_at})),...(v21?.journal || []).slice(0,5).map(item => ({kind:'INFO',title:item.kind,detail:item.message,time:item.created_at}))]
-  const previewLeverage = resolveLeverage(form.leverage)
+  const previewLeverage = resolveLeverage(form.leverage,form.customLeverage)
+  const filteredMarkets = markets.filter(market => `${market.display} ${market.symbol}`.toUpperCase().includes(symbolQuery.trim().toUpperCase())).slice(0,20)
   const previewEntry = form.orderType === 'LIMIT' ? numberValue(form.limitPrice) : Number(analysis?.entry || 0)
   const previewStop = numberValue(form.stop) || Number(analysis?.stop_loss || 0)
   const previewTp1 = numberValue(form.tp1) || Number(analysis?.tp1 || 0)
@@ -926,20 +933,20 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
 
     <section className={`demoMainGrid ${tab !== 'trade' ? 'demoTabHidden' : ''}`}>
       <div className="demoTicket">
-        <header><div><span>GÜVENLİ EMİR BİLETİ</span><h3>{symbol.replace('USDT','/USDT')}</h3></div><b>DEMO</b></header>
+        <header><div><span>GÜVENLİ EMİR BİLETİ</span><div className="demoSymbolPicker"><button type="button" className="demoSymbolTrigger" aria-expanded={symbolOpen} onClick={() => setSymbolOpen(open => !open)}><span>{symbol.replace('USDT','/USDT')}</span><ChevronDown/></button>{symbolOpen && <div className="demoSymbolPopover"><label><Search/><input autoFocus value={symbolQuery} onChange={event => setSymbolQuery(event.target.value)} placeholder="Search symbol..."/><button type="button" aria-label="Close symbol search" onClick={() => {setSymbolQuery('');setSymbolOpen(false)}}><X/></button></label><div>{filteredMarkets.length ? filteredMarkets.map(market => <button type="button" key={market.symbol} className={market.symbol === symbol ? 'active' : ''} onClick={() => {onSymbolChange(market.symbol);setSymbolQuery('');setSymbolOpen(false)}}><b>{market.display}</b><small>{fmt(market.price)} · {market.change >= 0 ? '+' : ''}{fmt(market.change)}%</small></button>) : <p>Symbol data unavailable.</p>}</div></div>}</div></div><b>DEMO</b></header>
         <div className="demoSidePicker"><button className={form.direction === 'LONG' ? 'activeLong' : ''} onClick={() => setForm({...form,direction:'LONG'})}>LONG</button><button className={form.direction === 'SHORT' ? 'activeShort' : ''} onClick={() => setForm({...form,direction:'SHORT'})}>SHORT</button></div>
         <div className="demoTypePicker"><button className={form.orderType === 'MARKET' ? 'activeType' : ''} onClick={() => setForm({...form,orderType:'MARKET'})}>PİYASA</button><button className={form.orderType === 'LIMIT' ? 'activeType' : ''} onClick={() => setForm({...form,orderType:'LIMIT'})}>LİMİT</button></div>
         <button className="demoAnalysisFill" disabled={busy} onClick={fillFromAnalysis}><Activity/> {busy ? 'ANALİZ ALINIYOR…' : 'GÜNCEL ANALİZDEN DOLDUR'}</button>
         <div className="demoFieldGrid">
           <label><span>MARJİN · 5–100 DEMO USDT</span><div><input type="number" min="5" max="100" step="1" value={form.margin} onChange={event => changeMargin(event.target.value)} onBlur={normalizeMargin}/><em>USDT</em></div></label>
-          <label className="leverageField"><span>LEVERAGE · MAX {status?.limits.max_leverage ?? 10}x</span><select value={form.leverage} onChange={event => setForm({...form,leverage:event.target.value as FormState['leverage']})}>{['AUTO','1','2','3','5','10'].map(value => <option key={value} value={value} disabled={value !== 'AUTO' && Number(value) > (status?.limits.max_leverage ?? 10)}>{value === 'AUTO' ? 'AUTO · 2x POLICY' : `${value}x`}</option>)}</select></label>
+          <label className="leverageField"><span>LEVERAGE · MAX {status?.limits.max_leverage ?? 50}x</span><select value={form.leverage} onChange={event => setForm({...form,leverage:event.target.value as FormState['leverage']})}>{['AUTO','1','2','3','5','10','15','20','25','30','40','50','CUSTOM'].map(value => <option key={value} value={value} disabled={value !== 'AUTO' && value !== 'CUSTOM' && Number(value) > (status?.limits.max_leverage ?? 50)}>{value === 'AUTO' ? 'AUTO · 2x POLICY' : value === 'CUSTOM' ? 'CUSTOM' : `${value}x`}</option>)}</select>{form.leverage === 'CUSTOM' && <input className="customLeverageInput" type="number" min="1" max="50" step="1" value={form.customLeverage} onChange={event => setForm({...form,customLeverage:event.target.value})} placeholder="Custom leverage: 37x"/>}</label>
           {form.orderType === 'LIMIT' && <label className="fullField"><span>LİMİT FİYATI</span><input value={form.limitPrice} onChange={event => setForm({...form,limitPrice:event.target.value})}/></label>}
           <label className="stopField"><span>STOP LOSS</span><input value={form.stop} onChange={event => setForm({...form,stop:event.target.value})}/></label>
           <label><span>TP1 · %30</span><input value={form.tp1} onChange={event => setForm({...form,tp1:event.target.value})}/></label>
           <label><span>TP2 · %30</span><input value={form.tp2} onChange={event => setForm({...form,tp2:event.target.value})}/></label>
           <label><span>TP3 · KALANI</span><input value={form.tp3} onChange={event => setForm({...form,tp3:event.target.value})}/></label>
         </div>
-        <div className="demoExposure"><span className={previewNotional > previewNotionalCap ? 'demoLoss' : ''}><small>NOTIONAL · CAP {fmt(previewNotionalCap)}</small><b>{fmt(previewNotional)} USDT</b></span><span><small>LEVERAGE</small><b>{form.leverage === 'AUTO' ? 'AUTO · 2x' : `${previewLeverage}x`}</b></span><span><small>POSITION SIZE</small><b>{previewAvailable ? fmt(previewQuantity) : '—'}</b></span><span><small>RISK / TRADE</small><b>{previewAvailable ? `${fmt(previewRisk)} USDT` : '—'}</b></span><span><small>GERÇEK PARA</small><b>0 USDT</b></span></div>
+        <div className="demoExposure"><span className={previewNotional > previewNotionalCap ? 'demoLoss' : ''}><small>NOTIONAL · CAP {fmt(previewNotionalCap)}</small><b>{fmt(previewNotional)} USDT</b></span><span><small>LEVERAGE</small><b>{form.leverage === 'AUTO' ? 'AUTO · 2x' : Number.isFinite(previewLeverage) ? `${previewLeverage}x` : 'INVALID'}</b></span><span><small>POSITION SIZE</small><b>{previewAvailable ? fmt(previewQuantity) : '—'}</b></span><span><small>RISK / TRADE</small><b>{previewAvailable ? `${fmt(previewRisk)} USDT` : '—'}</b></span><span><small>GERÇEK PARA</small><b>0 USDT</b></span></div>
         <button className="demoTest" disabled={busy || !status?.connected} onClick={testOrder}><TestTube2/> EMİR TESTİ · OLUŞTURMAZ</button>
         <button className="demoSubmit" disabled={busy || !status?.armed} onClick={submitOrder}><Send/> BINANCE DEMO EMRİ GÖNDER</button>
         <div className={`demoTicketFeedback demoTicketFeedback-${messageKind}`}>{messageKind === 'error' ? <TriangleAlert/> : messageKind === 'ok' ? <ShieldCheck/> : <Activity/>}<span><b>{messageKind === 'error' ? 'İŞLEM ENGELLENDİ' : messageKind === 'ok' ? 'DOĞRULAMA TAMAM' : 'GÜVENLİK DURUMU'}</b><small>{message}</small></span></div>

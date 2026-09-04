@@ -509,7 +509,7 @@ def daily_metrics(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def risk_size_values(entry: float, stop: float, max_loss: float, leverage: int, max_margin: float) -> dict[str, float]:
-    manual_max_leverage = 10
+    manual_max_leverage = 50
     if leverage < 1 or leverage > manual_max_leverage:
         raise HTTPException(422, f"Demo kaldıraç 1x ile {manual_max_leverage}x arasında olmalı.")
     distance = abs(entry - stop)
