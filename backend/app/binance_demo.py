@@ -603,14 +603,15 @@ async def account_snapshot(client: BinanceDemoClient) -> dict[str, Any]:
 
 
 async def _account_snapshot(client: BinanceDemoClient) -> dict[str, Any]:
-    account, positions, orders, algo_orders, hedge_mode, configurations = await asyncio.gather(
-        client.signed("GET", "/fapi/v3/account"),
-        client.signed("GET", "/fapi/v3/positionRisk"),
-        client.signed("GET", "/fapi/v1/openOrders"),
-        optional_open_algo_orders(client),
-        position_mode(client),
-        optional_symbol_configurations(client),
-    )
+    # Keep private snapshot reads sequential on the shared HTTP client.  This
+    # avoids a burst of signed requests competing with the protection loop for
+    # the same Render connection pool.
+    account = await client.signed("GET", "/fapi/v3/account")
+    positions = await client.signed("GET", "/fapi/v3/positionRisk")
+    orders = await client.signed("GET", "/fapi/v1/openOrders")
+    algo_orders = await optional_open_algo_orders(client)
+    hedge_mode = await position_mode(client)
+    configurations = await optional_symbol_configurations(client)
     config_by_symbol = {
         str(item.get("symbol") or "").upper(): item
         for item in response_rows(configurations)

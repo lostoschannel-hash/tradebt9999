@@ -226,6 +226,13 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         self.assertIn("async with DEMO_CLOCK_LOCK", SOURCE_TEXT)
         self.assertIn("DEMO_CLOCK_SYNCED_AT > request_started", SOURCE_TEXT)
 
+    def test_account_snapshot_reads_are_sequential_and_algo_orders_optional(self):
+        self.assertIn('account = await client.signed("GET", "/fapi/v3/account")', SOURCE_TEXT)
+        self.assertIn('positions = await client.signed("GET", "/fapi/v3/positionRisk")', SOURCE_TEXT)
+        self.assertIn('orders = await client.signed("GET", "/fapi/v1/openOrders")', SOURCE_TEXT)
+        self.assertIn("algo_orders = await optional_open_algo_orders(client)", SOURCE_TEXT)
+        self.assertNotIn("account, positions, orders, algo_orders, hedge_mode, configurations = await asyncio.gather(", SOURCE_TEXT)
+
     def test_position_lifecycle_tracks_partial_targets_and_full_close(self):
         lifecycle = CORE["update_position_lifecycle"]
         plan = {"position_id": "demo-123", "initial_quantity": "10", "quantity": "10"}
