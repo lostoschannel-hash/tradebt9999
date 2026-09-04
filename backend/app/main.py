@@ -3548,7 +3548,7 @@ async def smart_scan(limit: int = Query(18, ge=6, le=30), interval: str = "15m")
 
 
 @app.get("/api/analysis-universe")
-async def analysis_universe(interval: str = "15m", limit: int = Query(120, ge=1, le=200)):
+async def analysis_universe(interval: str = "15m", limit: int = Query(24, ge=1, le=24)):
     """Return cached, read-only technical snapshots for eligible USDT pairs."""
     if interval not in ALLOWED_INTERVALS:
         raise HTTPException(400, "Desteklenmeyen zaman dilimi")

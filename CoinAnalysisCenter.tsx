@@ -49,7 +49,7 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
   const load = async () => {
     setLoading(true); setScanMessage('Taranıyor…')
     try {
-      const response = await fetch(`${API_BASE}/analysis-universe?interval=${interval}&limit=200`)
+      const response = await fetch(`${API_BASE}/analysis-universe?interval=${interval}&limit=24`)
       const payload = await response.json() as {results?:Row[];detail?:string}
       if (!response.ok) throw new Error(payload.detail || 'Market data temporarily unavailable.')
       setRows(payload.results || []); setError(''); setScanMessage(`${payload.results?.length || 0} coin analiz edildi`)

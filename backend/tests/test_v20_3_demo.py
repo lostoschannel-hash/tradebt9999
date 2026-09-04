@@ -233,6 +233,12 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         self.assertIn("algo_orders = await optional_open_algo_orders(client)", SOURCE_TEXT)
         self.assertNotIn("account, positions, orders, algo_orders, hedge_mode, configurations = await asyncio.gather(", SOURCE_TEXT)
 
+    def test_analysis_universe_is_bounded_for_market_data_latency(self):
+        main_source = (ROOT / "backend" / "app" / "main.py").read_text(encoding="utf-8")
+        frontend_source = (ROOT / "CoinAnalysisCenter.tsx").read_text(encoding="utf-8")
+        self.assertIn('limit: int = Query(24, ge=1, le=24)', main_source)
+        self.assertIn('/analysis-universe?interval=${interval}&limit=24', frontend_source)
+
     def test_position_lifecycle_tracks_partial_targets_and_full_close(self):
         lifecycle = CORE["update_position_lifecycle"]
         plan = {"position_id": "demo-123", "initial_quantity": "10", "quantity": "10"}
