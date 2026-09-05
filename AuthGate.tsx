@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 import { ArrowRight, Eye, EyeOff, KeyRound, LogOut, MailCheck, ShieldCheck, UserRound } from 'lucide-react'
 import { API_BASE, clearUserSessionToken, saveUserSessionToken, userSessionToken } from './api'
 import AdminPanel from './AdminPanel'
@@ -58,6 +58,8 @@ export default function AuthGate({children}:{children:ReactNode}) {
   const [email,setEmail] = useState('')
   const [resetToken,setResetToken] = useState(new URLSearchParams(window.location.search).get('token') || '')
   const [resetPassword,setResetPassword] = useState({password:'',confirm_password:''})
+  const autoVerificationStarted = useRef(false)
+  const [autoVerifying,setAutoVerifying] = useState(false)
 
   const loadSession = async (value:string) => {
     if (!value) { setBusy(false); return }
@@ -70,6 +72,16 @@ export default function AuthGate({children}:{children:ReactNode}) {
   }
 
   useEffect(() => { void loadSession(token) }, [])
+
+  useEffect(() => {
+    if (mode !== 'verify' || !resetToken || autoVerificationStarted.current) return
+    autoVerificationStarted.current = true
+    setAutoVerifying(true)
+    void request('/auth/verify-email',{method:'POST',body:JSON.stringify({token:resetToken})})
+      .then(() => { setResetToken(''); setMessage('E-posta doğrulandı. Şimdi giriş yapabilirsiniz.'); setMode('login') })
+      .catch(error => { setResetToken(''); setMessage(error instanceof Error ? error.message : 'İşlem başarısız.') })
+      .finally(() => setAutoVerifying(false))
+  },[mode,resetToken])
 
   const submit = async (event:FormEvent) => {
     event.preventDefault(); setBusy(true); setMessage('')
@@ -105,6 +117,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
   }
 
   if (busy && !session) return <main className="authLoading"><div className="authLoader"><ShieldCheck/><b>GÜVENLİ OTURUM</b><span>Hesap durumu kontrol ediliyor…</span></div></main>
+  if (autoVerifying) return <main className="authLoading"><div className="authLoader"><MailCheck/><b>E-POSTA DOĞRULANIYOR</b><span>E-posta doğrulanıyor...</span></div></main>
   if (!session) {
     const registrationStrength = strength(register.password)
     return <main className="authPage">
