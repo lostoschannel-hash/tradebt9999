@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from pydantic import BaseModel, Field
@@ -743,6 +743,19 @@ async def v22_verify_email(payload: EmailTokenRequest, request: Request):
     save_state(rt["state"])
     await persist_v22_commercial(request.app)
     return {"ok": True, "message": "E-posta doğrulandı. Artık giriş yapabilirsiniz."}
+
+
+@router.get("/auth/verification-status")
+async def v22_verification_status(request: Request, token: str = Query(..., min_length=20, max_length=600)):
+    rt = runtime(request)
+    try:
+        payload = verify_token(token, rt["secret"], expected_kind="EMAIL_VERIFY")
+    except ValueError as exc:
+        raise HTTPException(400, "Geçersiz veya süresi dolmuş doğrulama bağlantısı") from exc
+    user = next((item for item in rt["state"]["users"] if item.get("id") == payload["sub"]), None)
+    if not user:
+        raise HTTPException(400, "Geçersiz veya süresi dolmuş doğrulama bağlantısı")
+    return {"verified": bool(user.get("email_verified", False))}
 
 
 @router.post("/auth/forgot-password")

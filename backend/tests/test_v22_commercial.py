@@ -4,6 +4,7 @@ import email
 import logging
 import os
 import sys
+import time
 import unittest
 from types import SimpleNamespace
 from pathlib import Path
@@ -24,7 +25,7 @@ from app.commercial_core import (  # noqa: E402
     verify_password,
     verify_token,
 )
-from app.v22_commercial import gmail_failure_log, send_auth_email, sync_v22_storage  # noqa: E402
+from app.v22_commercial import gmail_failure_log, send_auth_email, sync_v22_storage, v22_verification_status  # noqa: E402
 
 
 MAIN_SOURCE = (BACKEND / "app" / "main.py").read_text(encoding="utf-8")
@@ -37,6 +38,16 @@ GITIGNORE_SOURCE = (ROOT / ".gitignore").read_text(encoding="utf-8")
 
 
 class V22CommercialTests(unittest.TestCase):
+    def test_verification_status_reads_without_consuming_token(self):
+        secret = b"verification-status-test-secret-long-enough"
+        user = {"id": "user-1", "role": "CUSTOMER", "email_verified": False}
+        token = issue_token(user["id"], user["role"], secret, kind="EMAIL_VERIFY", now=int(time.time()), ttl_seconds=3_600)
+        application = SimpleNamespace(state=SimpleNamespace(v22_commercial={"secret": secret, "state": {"users": [user]}}))
+        request = SimpleNamespace(app=application)
+        self.assertEqual(asyncio.run(v22_verification_status(request, token)), {"verified": False})
+        user["email_verified"] = True
+        self.assertEqual(asyncio.run(v22_verification_status(request, token)), {"verified": True})
+
     def test_gmail_delivery_requires_oauth_configuration_without_sending(self):
         with patch.dict(os.environ, {}, clear=True), patch("app.v22_commercial.build") as gmail_build:
             with self.assertRaisesRegex(RuntimeError, "Gmail API yapılandırması eksik"):

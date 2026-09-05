@@ -77,10 +77,22 @@ export default function AuthGate({children}:{children:ReactNode}) {
     if (mode !== 'verify' || !resetToken || autoVerificationStarted.current) return
     autoVerificationStarted.current = true
     setAutoVerifying(true)
-    void request('/auth/verify-email',{method:'POST',body:JSON.stringify({token:resetToken})})
-      .then(() => { setResetToken(''); setMessage('E-posta doğrulandı. Şimdi giriş yapabilirsiniz.'); setMode('login') })
-      .catch(error => { setResetToken(''); setMessage(error instanceof Error ? error.message : 'İşlem başarısız.') })
-      .finally(() => setAutoVerifying(false))
+    let active = true
+    const checkStatus = async () => {
+      try {
+        const result = await request<{verified:boolean}>(`/auth/verification-status?token=${encodeURIComponent(resetToken)}`)
+        if (active && result.verified) {
+          setResetToken(''); setMessage('E-posta doğrulandı. Şimdi giriş yapabilirsiniz.'); setMode('login')
+        }
+      } catch (error) {
+        if (active) setMessage(error instanceof Error ? error.message : 'İşlem başarısız.')
+      } finally {
+        if (active) setAutoVerifying(false)
+      }
+    }
+    void checkStatus()
+    const interval = window.setInterval(() => void checkStatus(),2500)
+    return () => { active = false; window.clearInterval(interval) }
   },[mode,resetToken])
 
   const submit = async (event:FormEvent) => {
