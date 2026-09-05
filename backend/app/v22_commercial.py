@@ -11,7 +11,9 @@ import asyncio
 import copy
 import hashlib
 import json
+import logging
 import os
+import re
 import secrets
 import smtplib
 import time
@@ -51,6 +53,7 @@ except ImportError:  # pragma: no cover - dependency is installed in deployed en
     stripe = None
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v22", tags=["V24 Commercial Complete"])
 migrate_legacy_files((
     "v22_commercial_state.json",
@@ -71,6 +74,31 @@ DEFAULT_SMTP_FROM_NAME = "ProTreBot"
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def smtp_failure_log(exc: BaseException) -> dict[str, str]:
+    raw_message = str(exc)
+    sanitized = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[email-redacted]", raw_message)
+    sanitized = re.sub(r"(?i)(password|passwd|secret|token|authorization|bearer|credential)(\s*[:=]\s*)[^\s,;]+", r"\1\2[redacted]", sanitized)
+    sanitized = re.sub(r"(?i)(https?://[^\s?]+)\?[^\s]+", r"\1?[redacted]", sanitized)
+    code = getattr(exc, "smtp_code", None)
+    reason = "smtp"
+    if isinstance(exc, smtplib.SMTPAuthenticationError):
+        reason = "authentication"
+    elif isinstance(exc, (smtplib.SMTPNotSupportedError, smtplib.SMTPConnectError)):
+        reason = "connection"
+    elif isinstance(exc, (TimeoutError, smtplib.SMTPServerDisconnected)):
+        reason = "timeout"
+    elif "starttls" in raw_message.lower():
+        reason = "starttls"
+    elif "tls" in raw_message.lower() or "ssl" in raw_message.lower():
+        reason = "tls"
+    return {"type": type(exc).__name__, "code": str(code) if code is not None else "none", "reason": reason, "message": sanitized[:500]}
+
+
+def log_smtp_failure(exc: BaseException) -> None:
+    details = smtp_failure_log(exc)
+    logger.warning("SMTP email delivery failed: reason=%s type=%s code=%s message=%s", details["reason"], details["type"], details["code"], details["message"])
 
 
 def smtp_configured() -> bool:
@@ -688,6 +716,7 @@ async def v22_register(payload: RegisterRequest, request: Request):
         try:
             await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Verify your ProTreBot account", title="Verify your ProTreBot account", action_url=f"{app_base_url()}/verify-email?token={verification_token}", action_label="VERIFY EMAIL")
         except (OSError, RuntimeError, ValueError, smtplib.SMTPException) as exc:
+            log_smtp_failure(exc)
             async with rt["lock"]:
                 rt["state"]["users"] = [item for item in rt["state"]["users"] if item.get("id") != user["id"]]
                 rt["state"]["profiles"] = [item for item in rt["state"].get("profiles", []) if item.get("user_id") != user["id"]]
@@ -728,7 +757,8 @@ async def v22_forgot_password(payload: PasswordResetRequest, request: Request):
         if smtp_configured():
             try:
                 await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Reset your ProTreBot password", title="Reset your ProTreBot password", action_url=f"{app_base_url()}/reset-password?token={reset_token}", action_label="RESET PASSWORD")
-            except (OSError, RuntimeError, ValueError, smtplib.SMTPException):
+            except (OSError, RuntimeError, ValueError, smtplib.SMTPException) as exc:
+                log_smtp_failure(exc)
                 pass
         if env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False):
             response["development_reset_token"] = reset_token
