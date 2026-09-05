@@ -236,7 +236,11 @@ async def sync_v22_storage(application: Any) -> None:
 
 
 def public_user(user: dict[str, Any]) -> dict[str, Any]:
-    return {key: user.get(key) for key in ("id", "email", "display_name", "role", "active", "created_at")}
+    return {key: user.get(key) for key in ("id", "email", "display_name", "role", "active", "created_at", "email_verified")}
+
+
+def issue_email_token(user: dict[str, Any], secret: bytes, *, kind: str) -> str:
+    return issue_token(user["id"], user["role"], secret, kind=kind, ttl_seconds=24 * 60 * 60)
 
 
 def add_audit(state: dict[str, Any], kind: str, message: str, *, actor: str = "SYSTEM", subject: str | None = None) -> None:
@@ -272,6 +276,8 @@ def authenticated_user(request: Request, *, owner: bool = False) -> dict[str, An
     user = next((item for item in rt["state"]["users"] if item.get("id") == payload["sub"] and item.get("active")), None)
     if not user:
         raise HTTPException(401, "Kullanıcı etkin değil")
+    if user.get("role") != "OWNER" and user.get("email_verified") is False:
+        raise HTTPException(403, "E-posta doğrulaması gerekli")
     if int(payload.get("ver", 1)) != int(user.get("auth_version", 1)):
         raise HTTPException(401, "Oturum yenilenmeli")
     if owner and user.get("role") != "OWNER":
@@ -374,6 +380,28 @@ class LoginRequest(BaseModel):
     email: str = Field(min_length=5, max_length=180)
     password: str = Field(min_length=1, max_length=256)
     remember: bool = False
+
+
+class RegisterRequest(BaseModel):
+    display_name: str = Field(min_length=2, max_length=80)
+    email: str = Field(min_length=5, max_length=180)
+    password: str = Field(min_length=10, max_length=256)
+    confirm_password: str = Field(min_length=10, max_length=256)
+    terms_accepted: bool = False
+
+
+class EmailTokenRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=600)
+
+
+class PasswordResetRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=180)
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=600)
+    password: str = Field(min_length=10, max_length=256)
+    confirm_password: str = Field(min_length=10, max_length=256)
 
 
 class CustomerRequest(BootstrapRequest):
@@ -548,10 +576,92 @@ async def v22_login(payload: LoginRequest, request: Request):
     return {"token": token, "user": public_user(user), "license": active_license(rt["state"], user["id"]), "demo_only": True}
 
 
+@router.post("/auth/register")
+async def v22_register(payload: RegisterRequest, request: Request):
+    if not payload.terms_accepted:
+        raise HTTPException(422, "Kullanım koşullarını kabul etmelisiniz")
+    if payload.password != payload.confirm_password:
+        raise HTTPException(422, "Parolalar eşleşmiyor")
+    rt = runtime(request)
+    email = normalize_email(payload.email)
+    if "@" not in email:
+        raise HTTPException(422, "Geçerli bir e-posta yazın")
+    async with rt["lock"]:
+        state = rt["state"]
+        if any(item.get("email") == email for item in state["users"]):
+            raise HTTPException(409, "Bu e-posta zaten kayıtlı")
+        user_id = uuid.uuid4().hex
+        user = {
+            "id": user_id, "email": email, "display_name": payload.display_name.strip(),
+            "role": "CUSTOMER", "active": True, "auth_version": 1,
+            "email_verified": False, "password": hash_password(payload.password), "created_at": now_iso(),
+        }
+        state["users"].append(user)
+        add_audit(state, "USER_REGISTERED", "Yeni kullanıcı hesabı oluşturuldu.", actor=user_id, subject=user_id)
+        save_state(state)
+    await persist_v22_commercial(request.app)
+    verification_token = issue_email_token(user, rt["secret"], kind="EMAIL_VERIFY")
+    response: dict[str, Any] = {"user": public_user(user), "message": "Hesabınız oluşturuldu. E-postanızı doğrulayın.", "email_verification_required": True}
+    if env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False):
+        response["development_verification_token"] = verification_token
+    return response
+
+
+@router.post("/auth/verify-email")
+async def v22_verify_email(payload: EmailTokenRequest, request: Request):
+    rt = runtime(request)
+    try:
+        token = verify_token(payload.token, rt["secret"], expected_kind="EMAIL_VERIFY")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    user = next((item for item in rt["state"]["users"] if item.get("id") == token["sub"]), None)
+    if not user:
+        raise HTTPException(404, "Kullanıcı bulunamadı")
+    user["email_verified"] = True
+    save_state(rt["state"])
+    await persist_v22_commercial(request.app)
+    return {"ok": True, "message": "E-posta doğrulandı. Artık giriş yapabilirsiniz."}
+
+
+@router.post("/auth/forgot-password")
+async def v22_forgot_password(payload: PasswordResetRequest, request: Request):
+    rt = runtime(request)
+    user = next((item for item in rt["state"]["users"] if item.get("email") == normalize_email(payload.email)), None)
+    response: dict[str, Any] = {"ok": True, "message": "E-posta kayıtlıysa parola yenileme bağlantısı gönderildi."}
+    if user and env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False):
+        response["development_reset_token"] = issue_email_token(user, rt["secret"], kind="PASSWORD_RESET")
+    return response
+
+
+@router.post("/auth/reset-password")
+async def v22_reset_password(payload: PasswordResetConfirmRequest, request: Request):
+    if payload.password != payload.confirm_password:
+        raise HTTPException(422, "Parolalar eşleşmiyor")
+    rt = runtime(request)
+    try:
+        token = verify_token(payload.token, rt["secret"], expected_kind="PASSWORD_RESET")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    user = next((item for item in rt["state"]["users"] if item.get("id") == token["sub"]), None)
+    if not user:
+        raise HTTPException(404, "Kullanıcı bulunamadı")
+    user["password"] = hash_password(payload.password)
+    user["auth_version"] = int(user.get("auth_version", 1)) + 1
+    save_state(rt["state"])
+    await persist_v22_commercial(request.app)
+    return {"ok": True, "message": "Parolanız güncellendi. Yeni parolanızla giriş yapabilirsiniz."}
+
+
 @router.get("/session")
 async def v22_session(request: Request):
     user = authenticated_user(request)
     return {"user": public_user(user), "license": active_license(runtime(request)["state"], user["id"]), "demo_only": True}
+
+
+@router.get("/profile")
+async def v22_profile(request: Request):
+    user = authenticated_user(request)
+    return {"user": public_user(user), "subscription": subscription_for_user(runtime(request)["state"], user["id"]), "demo_only": True}
 
 
 def subscription_for_user(state: dict[str, Any], user_id: str) -> dict[str, Any]:

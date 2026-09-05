@@ -32,6 +32,7 @@ from .binance_demo import (
 )
 from .v21_demo import init_v21_demo, router as v21_demo_router, shutdown_v21_demo
 from .v22_commercial import (
+    authenticated_user,
     init_v22_commercial,
     router as v22_commercial_router,
     shutdown_v22_commercial,
@@ -721,6 +722,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+MEMBER_PUBLIC_PATHS = frozenset({
+    "/api/health", "/api/web/access/check", "/api/v22/public", "/api/v22/bootstrap",
+    "/api/v22/auth/login", "/api/v22/auth/register", "/api/v22/auth/verify-email",
+    "/api/v22/auth/forgot-password", "/api/v22/auth/reset-password", "/api/v22/subscription/webhook",
+})
+
 
 def apply_cors_headers(request, response):
     origin = request.headers.get("origin")
@@ -743,6 +750,11 @@ async def owner_preview_gate(request, call_next):
     )
     if not decision.allowed:
         return apply_cors_headers(request, JSONResponse({"detail": decision.detail}, status_code=decision.status_code))
+    if request.url.path.startswith("/api/") and request.method.upper() != "OPTIONS" and request.url.path not in MEMBER_PUBLIC_PATHS:
+        try:
+            request.state.member = authenticated_user(request)
+        except HTTPException as exc:
+            return apply_cors_headers(request, JSONResponse({"detail": exc.detail}, status_code=exc.status_code))
     configured_owner = str(request.headers.get("x-protrebot-owner") or "").strip() or bearer_token(request.headers.get("authorization"))
     request.state.web_owner_authenticated = bool(
         WEB_REQUIRE_AUTH

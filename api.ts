@@ -1,4 +1,5 @@
 const TOKEN_KEY = 'protrebot.web.owner-access'
+export const USER_SESSION_KEY = 'protrebot-v25-session'
 
 function normalizedApiBase(value: string | undefined): string {
   const base = (value || 'http://127.0.0.1:8000').trim().replace(/\/+$/, '')
@@ -20,6 +21,21 @@ export function saveOwnerAccessToken(token: string): void {
 
 export function clearOwnerAccessToken(): void {
   sessionStorage.removeItem(TOKEN_KEY)
+}
+
+export function userSessionToken(): string {
+  return localStorage.getItem(USER_SESSION_KEY) || sessionStorage.getItem(USER_SESSION_KEY) || ''
+}
+
+export function saveUserSessionToken(token: string, remember: boolean): void {
+  localStorage.removeItem(USER_SESSION_KEY)
+  sessionStorage.removeItem(USER_SESSION_KEY)
+  if (token.trim()) (remember ? localStorage : sessionStorage).setItem(USER_SESSION_KEY, token.trim())
+}
+
+export function clearUserSessionToken(): void {
+  localStorage.removeItem(USER_SESSION_KEY)
+  sessionStorage.removeItem(USER_SESSION_KEY)
 }
 
 function apiRequestPath(input: RequestInfo | URL): string | null {
@@ -52,6 +68,10 @@ export function installAuthorizedFetch(): void {
     const token = ownerAccessToken()
     if (token && isOwnerProtectedApiRequest(input) && !headers.has('X-ProTreBot-Owner')) {
       headers.set('X-ProTreBot-Owner', token)
+    }
+    const userToken = userSessionToken()
+    if (userToken && isOwnerProtectedApiRequest(input) && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${userToken}`)
     }
     return originalFetch(input, {...init, headers})
   }
