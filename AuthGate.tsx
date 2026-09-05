@@ -56,7 +56,11 @@ export default function AuthGate({children}:{children:ReactNode}) {
   const [login,setLogin] = useState({email:'',password:''})
   const [register,setRegister] = useState({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
   const [email,setEmail] = useState('')
-  const [resetToken,setResetToken] = useState(new URLSearchParams(window.location.search).get('token') || '')
+  const queryToken = new URLSearchParams(window.location.search).get('token') || ''
+  const [resetToken,setResetToken] = useState(window.location.pathname === '/reset-password' ? queryToken : '')
+  const [verificationLinkToken,setVerificationLinkToken] = useState(window.location.pathname === '/verify-email' ? queryToken : '')
+  const [verificationStatusToken,setVerificationStatusToken] = useState('')
+  const [verificationInput,setVerificationInput] = useState('')
   const [resetPassword,setResetPassword] = useState({password:'',confirm_password:''})
   const autoVerificationStarted = useRef(false)
   const [autoVerifying,setAutoVerifying] = useState(false)
@@ -74,15 +78,25 @@ export default function AuthGate({children}:{children:ReactNode}) {
   useEffect(() => { void loadSession(token) }, [])
 
   useEffect(() => {
-    if (mode !== 'verify' || !resetToken || autoVerificationStarted.current) return
+    if (mode !== 'verify' || autoVerificationStarted.current) return
+    if (!verificationLinkToken && !verificationStatusToken) return
     autoVerificationStarted.current = true
     setAutoVerifying(true)
     let active = true
+    const verifyEmailLink = async () => {
+      try {
+        await request('/auth/verify-email',{method:'POST',body:JSON.stringify({token:verificationLinkToken})})
+        if (active) { setVerificationLinkToken(''); setMessage('E-posta doğrulandı. Şimdi giriş yapabilirsiniz.'); setMode('login') }
+      } catch (error) {
+        if (active) setMessage(error instanceof Error ? error.message : 'İşlem başarısız.')
+      }
+      if (active) setAutoVerifying(false)
+    }
     const checkStatus = async () => {
       try {
-        const result = await request<{verified:boolean}>(`/auth/verification-status?token=${encodeURIComponent(resetToken)}`)
+        const result = await request<{verified:boolean}>(`/auth/verification-status?token=${encodeURIComponent(verificationStatusToken)}`)
         if (active && result.verified) {
-          setResetToken(''); setMessage('E-posta doğrulandı. Şimdi giriş yapabilirsiniz.'); setMode('login')
+          setVerificationStatusToken(''); setMessage('E-posta doğrulandı. Şimdi giriş yapabilirsiniz.'); setMode('login')
         }
       } catch (error) {
         if (active) setMessage(error instanceof Error ? error.message : 'İşlem başarısız.')
@@ -90,10 +104,14 @@ export default function AuthGate({children}:{children:ReactNode}) {
         if (active) setAutoVerifying(false)
       }
     }
-    void checkStatus()
-    const interval = window.setInterval(() => void checkStatus(),2500)
-    return () => { active = false; window.clearInterval(interval) }
-  },[mode,resetToken])
+    if (verificationLinkToken) void verifyEmailLink()
+    else {
+      void checkStatus()
+      const interval = window.setInterval(() => void checkStatus(),2500)
+      return () => { active = false; window.clearInterval(interval) }
+    }
+    return () => { active = false }
+  },[mode,verificationLinkToken,verificationStatusToken])
 
   const submit = async (event:FormEvent) => {
     event.preventDefault(); setBusy(true); setMessage('')
@@ -107,7 +125,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
         }
       } else if (mode === 'register') {
         const result = await request<{verification_status_token?:string;message:string}>('/auth/register',{method:'POST',body:JSON.stringify(register)})
-        setEmail(register.email); setResetToken(result.verification_status_token || ''); setMode('verify'); setMessage(result.message)
+        setEmail(register.email); setVerificationStatusToken(result.verification_status_token || ''); setVerificationInput(''); setMode('verify'); setMessage(result.message)
       } else if (mode === 'forgot') {
         const result = await request<{development_reset_token?:string;message:string}>('/auth/forgot-password',{method:'POST',body:JSON.stringify({email})})
         if (result.development_reset_token) setResetToken(result.development_reset_token)
@@ -116,7 +134,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
         await request('/auth/reset-password',{method:'POST',body:JSON.stringify({token:resetToken,...resetPassword})})
         setMessage('Parolanız güncellendi. Giriş yapabilirsiniz.'); setMode('login')
       } else {
-        await request('/auth/verify-email',{method:'POST',body:JSON.stringify({token:resetToken})})
+        await request('/auth/verify-email',{method:'POST',body:JSON.stringify({token:verificationInput})})
         setMessage('E-posta doğrulandı. Şimdi giriş yapabilirsiniz.'); setMode('login')
       }
     } catch (error) { setMessage(error instanceof Error ? error.message : 'İşlem başarısız.') }
@@ -140,7 +158,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
           {mode === 'login' && <><label>E-posta<input type="email" required autoComplete="username" value={login.email} onChange={event => setLogin({...login,email:event.target.value})} placeholder="siz@ornek.com"/></label><label>Parola<div className="authPassword"><input required type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={login.password} onChange={event => setLogin({...login,password:event.target.value})}/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label="Parolayı göster veya gizle">{showPassword ? <EyeOff/> : <Eye/>}</button></div></label><label className="authCheck"><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)}/><span>Bu cihazda oturumu hatırla</span></label></>}
           {mode === 'register' && <><label>Ad soyad<input required autoComplete="name" value={register.display_name} onChange={event => setRegister({...register,display_name:event.target.value})} placeholder="Ada Yılmaz"/></label><label>E-posta<input required type="email" autoComplete="email" value={register.email} onChange={event => setRegister({...register,email:event.target.value})} placeholder="siz@ornek.com"/></label><label>Parola<div className="authPassword"><input required type={showPassword ? 'text' : 'password'} autoComplete="new-password" value={register.password} onChange={event => setRegister({...register,password:event.target.value})}/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label="Parolayı göster veya gizle">{showPassword ? <EyeOff/> : <Eye/>}</button></div><div className={`passwordMeter strength${registrationStrength.score}`}><i style={{width:`${registrationStrength.score * 25}%`}}/><span>{registrationStrength.label} · en az 10 karakter, büyük harf, sayı ve sembol kullanın</span></div></label><label>Parola tekrar<input required type="password" autoComplete="new-password" value={register.confirm_password} onChange={event => setRegister({...register,confirm_password:event.target.value})}/></label><label className="authCheck"><input type="checkbox" checked={register.terms_accepted} onChange={event => setRegister({...register,terms_accepted:event.target.checked})}/><span>Kullanım koşullarını ve gizlilik politikasını kabul ediyorum.</span></label></>}
           {mode === 'forgot' && <label>E-posta<input required type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="siz@ornek.com"/><small>Kayıtlıysa yenileme bağlantısı hazırlanır.</small></label>}
-          {mode === 'verify' && <label>Doğrulama kodu<input required value={resetToken} onChange={event => setResetToken(event.target.value)} placeholder="E-posta doğrulama kodu"/><small>{message || 'Kayıt sonrası e-postanızdaki kodu girin.'}</small></label>}
+          {mode === 'verify' && <label>Doğrulama kodu<input required value={verificationInput} onChange={event => setVerificationInput(event.target.value)} placeholder="E-posta doğrulama kodu"/><small>{message || 'Kayıt sonrası e-postanızdaki kodu girin.'}</small></label>}
           {mode === 'reset' && <><label>Doğrulama kodu<input required value={resetToken} onChange={event => setResetToken(event.target.value)}/></label><label>Yeni parola<input required type="password" autoComplete="new-password" value={resetPassword.password} onChange={event => setResetPassword({...resetPassword,password:event.target.value})}/></label><label>Yeni parola tekrar<input required type="password" autoComplete="new-password" value={resetPassword.confirm_password} onChange={event => setResetPassword({...resetPassword,confirm_password:event.target.value})}/></label></>}
           <button className="authSubmit" disabled={busy}>{busy ? 'İŞLENİYOR…' : mode === 'login' ? 'GÜVENLİ GİRİŞ' : mode === 'register' ? 'HESAP OLUŞTUR' : mode === 'forgot' ? 'YENİLEME BAĞLANTISI GÖNDER' : mode === 'reset' ? 'PAROLAYI GÜNCELLE' : 'E-POSTAYI DOĞRULA'}<ArrowRight/></button>
         </form>
