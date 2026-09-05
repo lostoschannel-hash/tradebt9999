@@ -1,8 +1,13 @@
 import asyncio
+import base64
+import email
+import logging
+import os
 import sys
 import unittest
 from types import SimpleNamespace
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).parents[2]
@@ -19,7 +24,7 @@ from app.commercial_core import (  # noqa: E402
     verify_password,
     verify_token,
 )
-from app.v22_commercial import sync_v22_storage  # noqa: E402
+from app.v22_commercial import gmail_failure_log, send_auth_email, sync_v22_storage  # noqa: E402
 
 
 MAIN_SOURCE = (BACKEND / "app" / "main.py").read_text(encoding="utf-8")
@@ -32,6 +37,65 @@ GITIGNORE_SOURCE = (ROOT / ".gitignore").read_text(encoding="utf-8")
 
 
 class V22CommercialTests(unittest.TestCase):
+    def test_gmail_delivery_requires_oauth_configuration_without_sending(self):
+        with patch.dict(os.environ, {}, clear=True), patch("app.v22_commercial.build") as gmail_build:
+            with self.assertRaisesRegex(RuntimeError, "Gmail API yapılandırması eksik"):
+                send_auth_email(
+                    to_email="user@example.com", display_name="Test User", subject="Verify",
+                    title="Verify", action_url="https://example.com/verify?token=local", action_label="VERIFY",
+                )
+            gmail_build.assert_not_called()
+
+    def test_gmail_delivery_builds_rfc2822_html_message_and_sends_via_mock_api(self):
+        sent = {}
+
+        class Messages:
+            def send(self, *, userId, body):
+                sent.update({"user_id": userId, "body": body})
+                return self
+
+            def execute(self):
+                return {"id": "mock-message"}
+
+        class Users:
+            def messages(self):
+                return Messages()
+
+        class Gmail:
+            def users(self):
+                return Users()
+
+        env = {
+            "GMAIL_CLIENT_ID": "client-id-for-test",
+            "GMAIL_CLIENT_SECRET": "client-secret-for-test",
+            "GMAIL_REFRESH_TOKEN": "refresh-token-for-test",
+            "GMAIL_FROM_EMAIL": "privacykais@gmail.com",
+            "GMAIL_FROM_NAME": "ProTreBot",
+        }
+        with patch.dict(os.environ, env, clear=True), patch("app.v22_commercial.build", return_value=Gmail()) as gmail_build:
+            send_auth_email(
+                to_email="user@example.com", display_name="Test User", subject="Verify",
+                title="Verify", action_url="https://example.com/verify?token=local", action_label="VERIFY",
+            )
+        gmail_build.assert_called_once_with("gmail", "v1", credentials=gmail_build.call_args.kwargs["credentials"], cache_discovery=False)
+        self.assertEqual(sent["user_id"], "me")
+        decoded = base64.urlsafe_b64decode(sent["body"]["raw"] + "=" * (-len(sent["body"]["raw"]) % 4))
+        parsed = email.message_from_bytes(decoded)
+        self.assertEqual(parsed["From"], "ProTreBot <privacykais@gmail.com>")
+        part_types = [part.get_content_type() for part in parsed.walk()]
+        self.assertIn("text/plain", part_types)
+        self.assertIn("text/html", part_types)
+        self.assertNotIn("client-secret-for-test", decoded.decode("utf-8", errors="replace"))
+        self.assertNotIn("refresh-token-for-test", decoded.decode("utf-8", errors="replace"))
+
+    def test_gmail_diagnostic_redacts_credentials_and_classifies_api_auth(self):
+        error = type("MockHttpError", (Exception,), {"resp": SimpleNamespace(status=401)})("access_token=secret-value for user@example.com")
+        details = gmail_failure_log(error)
+        self.assertEqual(details["reason"], "authentication")
+        self.assertEqual(details["code"], "401")
+        self.assertNotIn("secret-value", details["message"])
+        self.assertNotIn("user@example.com", details["message"])
+
     def test_postgres_snapshot_restores_owner_after_runtime_restart(self):
         restored_state = default_commercial_state()
         restored_state["owner_user_id"] = "owner-from-postgres"

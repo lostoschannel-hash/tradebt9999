@@ -8,6 +8,7 @@ remain disabled so this package cannot move real money or place real orders.
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 import hashlib
 import json
@@ -15,7 +16,6 @@ import logging
 import os
 import re
 import secrets
-import smtplib
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -25,6 +25,8 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Request
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
 from pydantic import BaseModel, Field
 
 from .binance_demo import credentials_configured, public_status as demo_public_status
@@ -68,41 +70,38 @@ STANDARD_SESSION_SECONDS = 8 * 60 * 60
 REMEMBER_SESSION_SECONDS = 30 * 24 * 60 * 60
 COMMERCIAL_STATE_KEY = "v22-commercial"
 DURABLE_AUTH_REQUIRED = str(os.getenv("PROTREBOT_DURABLE_AUTH_REQUIRED", "")).strip().lower() in {"1", "true", "yes", "on"}
-DEFAULT_SMTP_FROM_EMAIL = "privacykais@gmail.com"
-DEFAULT_SMTP_FROM_NAME = "ProTreBot"
+DEFAULT_GMAIL_FROM_EMAIL = "privacykais@gmail.com"
+DEFAULT_GMAIL_FROM_NAME = "ProTreBot"
+GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+GMAIL_TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def smtp_failure_log(exc: BaseException) -> dict[str, str]:
+def gmail_failure_log(exc: BaseException) -> dict[str, str]:
     raw_message = str(exc)
     sanitized = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[email-redacted]", raw_message)
     sanitized = re.sub(r"(?i)(password|passwd|secret|token|authorization|bearer|credential)(\s*[:=]\s*)[^\s,;]+", r"\1\2[redacted]", sanitized)
     sanitized = re.sub(r"(?i)(https?://[^\s?]+)\?[^\s]+", r"\1?[redacted]", sanitized)
-    code = getattr(exc, "smtp_code", None)
-    reason = "smtp"
-    if isinstance(exc, smtplib.SMTPAuthenticationError):
+    response = getattr(exc, "resp", None)
+    code = getattr(response, "status", None) or getattr(exc, "status_code", None)
+    reason = "gmail_api"
+    if code in {401, 403}:
         reason = "authentication"
-    elif isinstance(exc, (smtplib.SMTPNotSupportedError, smtplib.SMTPConnectError)):
-        reason = "connection"
-    elif isinstance(exc, (TimeoutError, smtplib.SMTPServerDisconnected)):
+    elif isinstance(exc, (TimeoutError, ConnectionError)):
         reason = "timeout"
-    elif "starttls" in raw_message.lower():
-        reason = "starttls"
-    elif "tls" in raw_message.lower() or "ssl" in raw_message.lower():
-        reason = "tls"
     return {"type": type(exc).__name__, "code": str(code) if code is not None else "none", "reason": reason, "message": sanitized[:500]}
 
 
-def log_smtp_failure(exc: BaseException) -> None:
-    details = smtp_failure_log(exc)
-    logger.warning("SMTP email delivery failed: reason=%s type=%s code=%s message=%s", details["reason"], details["type"], details["code"], details["message"])
+def log_gmail_failure(exc: BaseException) -> None:
+    details = gmail_failure_log(exc)
+    logger.warning("Gmail API email delivery failed: reason=%s type=%s code=%s message=%s", details["reason"], details["type"], details["code"], details["message"])
 
 
-def smtp_configured() -> bool:
-    return bool(os.getenv("SMTP_HOST", "").strip() and os.getenv("SMTP_USERNAME", "").strip() and os.getenv("SMTP_PASSWORD", "").strip())
+def gmail_configured() -> bool:
+    return all(os.getenv(name, "").strip() for name in ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"))
 
 
 def app_base_url() -> str:
@@ -118,24 +117,25 @@ def auth_email_html(title: str, display_name: str, action_url: str, action_label
 
 
 def send_auth_email(*, to_email: str, display_name: str, subject: str, title: str, action_url: str, action_label: str) -> None:
-    host = os.getenv("SMTP_HOST", "").strip()
-    if not host:
-        raise RuntimeError("SMTP_HOST yapılandırılmamış")
-    port = int(os.getenv("SMTP_PORT", "587").strip() or "587")
-    username = os.getenv("SMTP_USERNAME", "").strip()
-    password = os.getenv("SMTP_PASSWORD", "")
+    missing = [name for name in ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN") if not os.getenv(name, "").strip()]
+    if missing:
+        raise RuntimeError(f"Gmail API yapılandırması eksik: {', '.join(missing)}")
+    credentials = Credentials(
+        token=None,
+        refresh_token=os.environ["GMAIL_REFRESH_TOKEN"].strip(),
+        token_uri=GMAIL_TOKEN_URI,
+        client_id=os.environ["GMAIL_CLIENT_ID"].strip(),
+        client_secret=os.environ["GMAIL_CLIENT_SECRET"].strip(),
+        scopes=[GMAIL_SEND_SCOPE],
+    )
     message = EmailMessage()
     message["Subject"] = subject
-    message["From"] = f"{os.getenv('SMTP_FROM_NAME', DEFAULT_SMTP_FROM_NAME).strip()} <{os.getenv('SMTP_FROM_EMAIL', DEFAULT_SMTP_FROM_EMAIL).strip()}>"
+    message["From"] = f"{os.getenv('GMAIL_FROM_NAME', DEFAULT_GMAIL_FROM_NAME).strip()} <{os.getenv('GMAIL_FROM_EMAIL', DEFAULT_GMAIL_FROM_EMAIL).strip()}>"
     message["To"] = to_email
     message.set_content(f"{title}\n\n{action_url}")
     message.add_alternative(auth_email_html(title, display_name, action_url, action_label, "24 saat"), subtype="html")
-    with smtplib.SMTP(host, port, timeout=15) as smtp:
-        if port == 587:
-            smtp.starttls()
-        if username:
-            smtp.login(username, password)
-        smtp.send_message(message)
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+    build("gmail", "v1", credentials=credentials, cache_discovery=False).users().messages().send(userId="me", body={"raw": raw}).execute()
 
 
 def issue_one_time_token(state: dict[str, Any], user: dict[str, Any], secret: bytes, *, kind: str) -> str:
@@ -712,11 +712,11 @@ async def v22_register(payload: RegisterRequest, request: Request):
         add_audit(state, "USER_REGISTERED", "Yeni kullanıcı hesabı oluşturuldu.", actor=user_id, subject=user_id)
         save_state(state)
     await persist_v22_commercial(request.app)
-    if smtp_configured():
+    if gmail_configured():
         try:
             await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Verify your ProTreBot account", title="Verify your ProTreBot account", action_url=f"{app_base_url()}/verify-email?token={verification_token}", action_label="VERIFY EMAIL")
-        except (OSError, RuntimeError, ValueError, smtplib.SMTPException) as exc:
-            log_smtp_failure(exc)
+        except (OSError, RuntimeError, ValueError) as exc:
+            log_gmail_failure(exc)
             async with rt["lock"]:
                 rt["state"]["users"] = [item for item in rt["state"]["users"] if item.get("id") != user["id"]]
                 rt["state"]["profiles"] = [item for item in rt["state"].get("profiles", []) if item.get("user_id") != user["id"]]
@@ -754,11 +754,11 @@ async def v22_forgot_password(payload: PasswordResetRequest, request: Request):
             reset_token = issue_one_time_token(rt["state"], user, rt["secret"], kind="PASSWORD_RESET")
             save_state(rt["state"])
         await persist_v22_commercial(request.app)
-        if smtp_configured():
+        if gmail_configured():
             try:
                 await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Reset your ProTreBot password", title="Reset your ProTreBot password", action_url=f"{app_base_url()}/reset-password?token={reset_token}", action_label="RESET PASSWORD")
-            except (OSError, RuntimeError, ValueError, smtplib.SMTPException) as exc:
-                log_smtp_failure(exc)
+            except (OSError, RuntimeError, ValueError) as exc:
+                log_gmail_failure(exc)
                 pass
         if env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False):
             response["development_reset_token"] = reset_token

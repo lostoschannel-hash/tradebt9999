@@ -24,17 +24,15 @@ services:
         value: https://frontend-nu-two-18.vercel.app
       - key: APP_BASE_URL
         sync: false
-      - key: SMTP_HOST
+      - key: GMAIL_CLIENT_ID
         sync: false
-      - key: SMTP_PORT
-        value: "587"
-      - key: SMTP_USERNAME
+      - key: GMAIL_CLIENT_SECRET
         sync: false
-      - key: SMTP_PASSWORD
+      - key: GMAIL_REFRESH_TOKEN
         sync: false
-      - key: SMTP_FROM_EMAIL
+      - key: GMAIL_FROM_EMAIL
         value: privacykais@gmail.com
-      - key: SMTP_FROM_NAME
+      - key: GMAIL_FROM_NAME
         value: ProTreBot
       - key: PROTREBOT_EXPOSE_DEV_TOKENS
         value: "false"

@@ -9,3 +9,5 @@ websockets==16.1.1
 python-dotenv==1.2.2
 cryptography==46.0.0
 stripe==12.5.1
+google-api-python-client==2.187.0
+google-auth==2.43.0
