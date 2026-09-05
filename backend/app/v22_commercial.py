@@ -693,6 +693,7 @@ async def v22_register(payload: RegisterRequest, request: Request):
     if "@" not in email:
         raise HTTPException(422, "Geçerli bir e-posta yazın")
     expose_dev_token = env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False)
+    logger.warning("Gmail config presence: client_id=%s client_secret=%s refresh_token=%s", bool(os.getenv("GMAIL_CLIENT_ID", "").strip()), bool(os.getenv("GMAIL_CLIENT_SECRET", "").strip()), bool(os.getenv("GMAIL_REFRESH_TOKEN", "").strip()))
     if not gmail_configured() and not expose_dev_token:
         raise HTTPException(503, "E-posta servisi yapılandırılmamış; kayıt şu anda tamamlanamıyor")
     async with rt["lock"]:
