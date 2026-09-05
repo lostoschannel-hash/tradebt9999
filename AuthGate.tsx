@@ -107,7 +107,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
     if (verificationLinkToken) void verifyEmailLink()
     else {
       void checkStatus()
-      const interval = window.setInterval(() => void checkStatus(),2500)
+      const interval = window.setInterval(() => void checkStatus(),1000)
       return () => { active = false; window.clearInterval(interval) }
     }
     return () => { active = false }
