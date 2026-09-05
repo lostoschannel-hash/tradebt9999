@@ -13,9 +13,11 @@ import hashlib
 import json
 import os
 import secrets
+import smtplib
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -40,7 +42,7 @@ from .commercial_core import (
 )
 from .commerce_core import sanitize_business_settings
 from .local_storage import DATA_DIR, migrate_legacy_files
-from .web_security import MIN_ACCESS_TOKEN_LENGTH, bootstrap_access_allowed
+from .web_security import MIN_ACCESS_TOKEN_LENGTH, bootstrap_access_allowed, env_flag
 from .subscription_core import PLAN_CATALOG as SUBSCRIPTION_PLAN_CATALOG, TRIAL_DAYS, active_subscription, entitlement_snapshot
 
 try:
@@ -63,10 +65,68 @@ STANDARD_SESSION_SECONDS = 8 * 60 * 60
 REMEMBER_SESSION_SECONDS = 30 * 24 * 60 * 60
 COMMERCIAL_STATE_KEY = "v22-commercial"
 DURABLE_AUTH_REQUIRED = str(os.getenv("PROTREBOT_DURABLE_AUTH_REQUIRED", "")).strip().lower() in {"1", "true", "yes", "on"}
+DEFAULT_SMTP_FROM_EMAIL = "privacykais@gmail.com"
+DEFAULT_SMTP_FROM_NAME = "ProTreBot"
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def smtp_configured() -> bool:
+    return bool(os.getenv("SMTP_HOST", "").strip() and os.getenv("SMTP_USERNAME", "").strip() and os.getenv("SMTP_PASSWORD", "").strip())
+
+
+def app_base_url() -> str:
+    value = os.getenv("APP_BASE_URL", "http://localhost:5173").strip().rstrip("/")
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment:
+        raise HTTPException(503, "APP_BASE_URL güvenli bir mutlak URL olarak yapılandırılmalı")
+    return value
+
+
+def auth_email_html(title: str, display_name: str, action_url: str, action_label: str, expiry: str) -> str:
+    return f"""<!doctype html><html><body style=\"margin:0;background:#071116;color:#dce8ee;font-family:Arial,sans-serif\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"padding:32px 12px;background:#071116\"><tr><td align=\"center\"><table role=\"presentation\" width=\"100%\" style=\"max-width:560px;background:#101d23;border:1px solid #263943;border-radius:8px\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:30px\"><div style=\"color:#64e3a1;font-size:12px;font-weight:700;letter-spacing:2px\">PROTREBOT</div><h1 style=\"font-size:26px;line-height:1.2;margin:22px 0 12px;color:#f1f7f8\">{title}</h1><p style=\"font-size:15px;line-height:1.6;color:#a9bbc2\">Merhaba {display_name}, hesabınız için güvenli işlem başlatıldı.</p><p style=\"font-size:15px;line-height:1.6;color:#a9bbc2\">Devam etmek için aşağıdaki düğmeyi kullanın:</p><p style=\"margin:26px 0\"><a href=\"{action_url}\" style=\"display:inline-block;padding:14px 22px;background:#64e3a1;color:#082016;text-decoration:none;border-radius:4px;font-weight:700\">{action_label}</a></p><p style=\"font-size:12px;line-height:1.5;color:#8297a0\">Bu bağlantı {expiry} içinde geçerliliğini yitirir ve yalnızca bir kez kullanılabilir.</p><p style=\"font-size:12px;line-height:1.5;color:#8297a0\">Bu işlemi siz başlatmadıysanız bu e-postayı güvenle yok sayın. ProTreBot ekibi parolanızı veya API anahtarınızı istemez.</p></td></tr></table></td></tr></table></body></html>"""
+
+
+def send_auth_email(*, to_email: str, display_name: str, subject: str, title: str, action_url: str, action_label: str) -> None:
+    host = os.getenv("SMTP_HOST", "").strip()
+    if not host:
+        raise RuntimeError("SMTP_HOST yapılandırılmamış")
+    port = int(os.getenv("SMTP_PORT", "587").strip() or "587")
+    username = os.getenv("SMTP_USERNAME", "").strip()
+    password = os.getenv("SMTP_PASSWORD", "")
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = f"{os.getenv('SMTP_FROM_NAME', DEFAULT_SMTP_FROM_NAME).strip()} <{os.getenv('SMTP_FROM_EMAIL', DEFAULT_SMTP_FROM_EMAIL).strip()}>"
+    message["To"] = to_email
+    message.set_content(f"{title}\n\n{action_url}")
+    message.add_alternative(auth_email_html(title, display_name, action_url, action_label, "24 saat"), subtype="html")
+    with smtplib.SMTP(host, port, timeout=15) as smtp:
+        if port == 587:
+            smtp.starttls()
+        if username:
+            smtp.login(username, password)
+        smtp.send_message(message)
+
+
+def issue_one_time_token(state: dict[str, Any], user: dict[str, Any], secret: bytes, *, kind: str) -> str:
+    token = issue_token(user["id"], user["role"], secret, kind=kind, ttl_seconds=24 * 60 * 60)
+    payload = verify_token(token, secret, expected_kind=kind)
+    state.setdefault("auth_tokens", []).append({"jti": payload["jti"], "kind": kind, "user_id": user["id"], "expires_at": datetime.fromtimestamp(payload["exp"], timezone.utc).isoformat(), "used": False})
+    return token
+
+
+def consume_one_time_token(state: dict[str, Any], token: str, secret: bytes, *, kind: str) -> dict[str, Any]:
+    try:
+        payload = verify_token(token, secret, expected_kind=kind)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    row = next((item for item in state.get("auth_tokens", []) if item.get("jti") == payload.get("jti") and item.get("kind") == kind and item.get("user_id") == payload.get("sub")), None)
+    if not row or row.get("used"):
+        raise HTTPException(400, "Bu güvenlik bağlantısı geçersiz veya daha önce kullanılmış")
+    row["used"] = True
+    return payload
 
 
 def parse_date(value: str | None) -> datetime:
@@ -101,7 +161,7 @@ def sanitize_state(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return base
     for key in (
-        "users", "subscriptions", "stripe_event_ids", "licenses", "pairing_codes", "agents", "audit", "plans",
+        "users", "profiles", "subscriptions", "auth_tokens", "stripe_event_ids", "licenses", "pairing_codes", "agents", "audit", "plans",
         "release_evidence", "leads", "demo_invoices", "support_tickets", "acceptances",
     ):
         if key in payload and isinstance(payload[key], type(base[key])):
@@ -236,7 +296,7 @@ async def sync_v22_storage(application: Any) -> None:
 
 
 def public_user(user: dict[str, Any]) -> dict[str, Any]:
-    return {key: user.get(key) for key in ("id", "email", "display_name", "role", "active", "created_at", "email_verified")}
+    return {key: user.get(key) for key in ("id", "email", "display_name", "role", "active", "created_at", "last_activity", "email_verified")}
 
 
 def issue_email_token(user: dict[str, Any], secret: bytes, *, kind: str) -> str:
@@ -294,17 +354,23 @@ def active_license(state: dict[str, Any], user_id: str) -> dict[str, Any] | None
 def admin_overview(state: dict[str, Any]) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     active_licenses = [item for item in state["licenses"] if item.get("status") == "ACTIVE" and parse_date(item.get("expires_at")) > now]
+    active_subscriptions = [item for item in state.get("subscriptions", []) if item.get("status") in {"active", "ACTIVE", "TRIAL"} and (not item.get("expires_at") or parse_date(item.get("expires_at")) > now)]
+    pro_users = {item.get("user_id") for item in active_subscriptions if str(item.get("plan", "")).upper() == "PRO"} | {item.get("user_id") for item in active_licenses if str(item.get("plan", "")).upper() == "PRO"}
+    new_cutoff = now - timedelta(days=30)
     online_cutoff = now - timedelta(minutes=3)
     online_agents = [item for item in state["agents"] if parse_date(item.get("last_seen_at")) >= online_cutoff and item.get("status") == "ACTIVE"]
     return {
-        "users": len(state["users"]),
+        "users": len(state["users"]), "total_users": len(state["users"]),
         "active_users": sum(1 for item in state["users"] if item.get("active")),
+        "new_users": sum(1 for item in state["users"] if parse_date(item.get("created_at")) >= new_cutoff),
+        "pro_users": len(pro_users), "free_users": max(0, len(state["users"]) - len(pro_users)),
+        "active_subscriptions": len(active_subscriptions), "expired_subscriptions": sum(1 for item in state.get("subscriptions", []) if item.get("expires_at") and parse_date(item.get("expires_at")) <= now),
         "licenses": len(state["licenses"]),
         "active_licenses": len(active_licenses),
         "agents": len(state["agents"]),
         "online_agents": len(online_agents),
         "monthly_demo_revenue_usd": round(sum(float(state["plans"].get(item.get("plan"), {}).get("monthly_usd", 0)) for item in active_licenses), 2),
-        "customers": [{**public_user(user), "license": active_license(state, user["id"])} for user in state["users"]],
+        "customers": [{**public_user(user), "license": active_license(state, user["id"]), "subscription": subscription_for_user(state, user["id"])} for user in state["users"]],
         "agents_list": state["agents"][-40:],
         "audit": state["audit"][:50],
         "billing_live": False,
@@ -404,6 +470,11 @@ class PasswordResetConfirmRequest(BaseModel):
     confirm_password: str = Field(min_length=10, max_length=256)
 
 
+class ProfileUpdateRequest(BaseModel):
+    display_name: str = Field(min_length=2, max_length=80)
+    preferences: dict[str, Any] = Field(default_factory=dict)
+
+
 class CustomerRequest(BootstrapRequest):
     plan: Literal["TRIAL", "STARTER", "PRO", "ELITE"] = "TRIAL"
     days: int = Field(default=7, ge=1, le=730)
@@ -465,6 +536,10 @@ class GridGuardRequest(BaseModel):
 class CustomerStatusRequest(BaseModel):
     active: bool
     reason: str = Field(default="Yönetici işlemi", max_length=180)
+
+
+class RoleUpdateRequest(BaseModel):
+    role: Literal["OWNER", "CUSTOMER"]
 
 
 class RevokeRequest(BaseModel):
@@ -566,6 +641,9 @@ async def v22_login(payload: LoginRequest, request: Request):
         LOGIN_ATTEMPTS[host] = attempts
         raise HTTPException(401, "E-posta veya parola hatalı")
     LOGIN_ATTEMPTS.pop(host, None)
+    user["last_activity"] = now_iso()
+    save_state(rt["state"])
+    await persist_v22_commercial(request.app)
     token = issue_token(
         user["id"],
         user["role"],
@@ -586,6 +664,9 @@ async def v22_register(payload: RegisterRequest, request: Request):
     email = normalize_email(payload.email)
     if "@" not in email:
         raise HTTPException(422, "Geçerli bir e-posta yazın")
+    expose_dev_token = env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False)
+    if not smtp_configured() and not expose_dev_token:
+        raise HTTPException(503, "E-posta servisi yapılandırılmamış; kayıt şu anda tamamlanamıyor")
     async with rt["lock"]:
         state = rt["state"]
         if any(item.get("email") == email for item in state["users"]):
@@ -597,12 +678,26 @@ async def v22_register(payload: RegisterRequest, request: Request):
             "email_verified": False, "password": hash_password(payload.password), "created_at": now_iso(),
         }
         state["users"].append(user)
+        state["profiles"].append({"id": uuid.uuid4().hex, "user_id": user_id, "full_name": user["display_name"], "avatar_url": None, "role": "user", "preferences": {}, "created_at": user["created_at"], "updated_at": user["created_at"]})
+        state["subscriptions"].append({"id": uuid.uuid4().hex, "user_id": user_id, "plan": "FREE", "status": "inactive", "started_at": user["created_at"], "expires_at": None, "created_at": user["created_at"], "updated_at": user["created_at"]})
+        verification_token = issue_one_time_token(state, user, rt["secret"], kind="EMAIL_VERIFY")
         add_audit(state, "USER_REGISTERED", "Yeni kullanıcı hesabı oluşturuldu.", actor=user_id, subject=user_id)
         save_state(state)
     await persist_v22_commercial(request.app)
-    verification_token = issue_email_token(user, rt["secret"], kind="EMAIL_VERIFY")
+    if smtp_configured():
+        try:
+            await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Verify your ProTreBot account", title="Verify your ProTreBot account", action_url=f"{app_base_url()}/verify-email?token={verification_token}", action_label="VERIFY EMAIL")
+        except (OSError, RuntimeError, ValueError, smtplib.SMTPException) as exc:
+            async with rt["lock"]:
+                rt["state"]["users"] = [item for item in rt["state"]["users"] if item.get("id") != user["id"]]
+                rt["state"]["profiles"] = [item for item in rt["state"].get("profiles", []) if item.get("user_id") != user["id"]]
+                rt["state"]["subscriptions"] = [item for item in rt["state"].get("subscriptions", []) if item.get("user_id") != user["id"]]
+                rt["state"]["auth_tokens"] = [item for item in rt["state"].get("auth_tokens", []) if item.get("user_id") != user["id"]]
+                save_state(rt["state"])
+            await persist_v22_commercial(request.app)
+            raise HTTPException(503, "Doğrulama e-postası gönderilemedi; SMTP ayarlarını kontrol edin") from exc
     response: dict[str, Any] = {"user": public_user(user), "message": "Hesabınız oluşturuldu. E-postanızı doğrulayın.", "email_verification_required": True}
-    if env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False):
+    if expose_dev_token:
         response["development_verification_token"] = verification_token
     return response
 
@@ -610,10 +705,7 @@ async def v22_register(payload: RegisterRequest, request: Request):
 @router.post("/auth/verify-email")
 async def v22_verify_email(payload: EmailTokenRequest, request: Request):
     rt = runtime(request)
-    try:
-        token = verify_token(payload.token, rt["secret"], expected_kind="EMAIL_VERIFY")
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+    token = consume_one_time_token(rt["state"], payload.token, rt["secret"], kind="EMAIL_VERIFY")
     user = next((item for item in rt["state"]["users"] if item.get("id") == token["sub"]), None)
     if not user:
         raise HTTPException(404, "Kullanıcı bulunamadı")
@@ -628,8 +720,18 @@ async def v22_forgot_password(payload: PasswordResetRequest, request: Request):
     rt = runtime(request)
     user = next((item for item in rt["state"]["users"] if item.get("email") == normalize_email(payload.email)), None)
     response: dict[str, Any] = {"ok": True, "message": "E-posta kayıtlıysa parola yenileme bağlantısı gönderildi."}
-    if user and env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False):
-        response["development_reset_token"] = issue_email_token(user, rt["secret"], kind="PASSWORD_RESET")
+    if user:
+        async with rt["lock"]:
+            reset_token = issue_one_time_token(rt["state"], user, rt["secret"], kind="PASSWORD_RESET")
+            save_state(rt["state"])
+        await persist_v22_commercial(request.app)
+        if smtp_configured():
+            try:
+                await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Reset your ProTreBot password", title="Reset your ProTreBot password", action_url=f"{app_base_url()}/reset-password?token={reset_token}", action_label="RESET PASSWORD")
+            except (OSError, RuntimeError, ValueError, smtplib.SMTPException):
+                pass
+        if env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False):
+            response["development_reset_token"] = reset_token
     return response
 
 
@@ -638,10 +740,7 @@ async def v22_reset_password(payload: PasswordResetConfirmRequest, request: Requ
     if payload.password != payload.confirm_password:
         raise HTTPException(422, "Parolalar eşleşmiyor")
     rt = runtime(request)
-    try:
-        token = verify_token(payload.token, rt["secret"], expected_kind="PASSWORD_RESET")
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+    token = consume_one_time_token(rt["state"], payload.token, rt["secret"], kind="PASSWORD_RESET")
     user = next((item for item in rt["state"]["users"] if item.get("id") == token["sub"]), None)
     if not user:
         raise HTTPException(404, "Kullanıcı bulunamadı")
@@ -661,7 +760,39 @@ async def v22_session(request: Request):
 @router.get("/profile")
 async def v22_profile(request: Request):
     user = authenticated_user(request)
-    return {"user": public_user(user), "subscription": subscription_for_user(runtime(request)["state"], user["id"]), "demo_only": True}
+    profile = next((item for item in runtime(request)["state"].get("profiles", []) if item.get("user_id") == user["id"]), None)
+    return {"user": public_user(user), "profile": profile, "subscription": subscription_for_user(runtime(request)["state"], user["id"]), "demo_only": True}
+
+
+@router.patch("/profile")
+async def v22_update_profile(payload: ProfileUpdateRequest, request: Request):
+    user = authenticated_user(request)
+    rt = runtime(request)
+    async with rt["lock"]:
+        user["display_name"] = payload.display_name.strip()
+        profile = next((item for item in rt["state"].setdefault("profiles", []) if item.get("user_id") == user["id"]), None)
+        if profile is None:
+            profile = {"id": uuid.uuid4().hex, "user_id": user["id"], "created_at": now_iso()}
+            rt["state"]["profiles"].append(profile)
+        profile.update({"full_name": user["display_name"], "preferences": payload.preferences, "updated_at": now_iso()})
+        save_state(rt["state"])
+    await persist_v22_commercial(request.app)
+    return {"user": public_user(user), "profile": profile}
+
+
+@router.delete("/profile")
+async def v22_delete_profile(request: Request):
+    user = authenticated_user(request)
+    if user.get("role") == "OWNER":
+        raise HTTPException(422, "Ana yönetici hesabı bu ekrandan silinemez")
+    rt = runtime(request)
+    async with rt["lock"]:
+        user["active"] = False
+        user["auth_version"] = int(user.get("auth_version", 1)) + 1
+        add_audit(rt["state"], "ACCOUNT_DISABLED", "Kullanıcı kendi hesabını kapattı.", actor=user["id"], subject=user["id"])
+        save_state(rt["state"])
+    await persist_v22_commercial(request.app)
+    return {"ok": True}
 
 
 def subscription_for_user(state: dict[str, Any], user_id: str) -> dict[str, Any]:
@@ -891,6 +1022,24 @@ async def v22_logout(request: Request):
 async def v22_admin_overview(request: Request):
     authenticated_user(request, owner=True)
     return admin_overview(runtime(request)["state"])
+
+
+@router.patch("/admin/users/{user_id}/role")
+async def v22_admin_update_role(user_id: str, payload: RoleUpdateRequest, request: Request):
+    owner = authenticated_user(request, owner=True)
+    rt = runtime(request)
+    if user_id == owner["id"] and payload.role != "OWNER":
+        raise HTTPException(422, "Son yönetici hesabının rolü düşürülemez")
+    async with rt["lock"]:
+        user = next((item for item in rt["state"]["users"] if item.get("id") == user_id), None)
+        if not user:
+            raise HTTPException(404, "Kullanıcı bulunamadı")
+        user["role"] = payload.role
+        user["auth_version"] = int(user.get("auth_version", 1)) + 1
+        add_audit(rt["state"], "ROLE_CHANGED", f"Kullanıcı rolü {payload.role} olarak güncellendi.", actor=owner["id"], subject=user_id)
+        save_state(rt["state"])
+    await persist_v22_commercial(request.app)
+    return {"user": public_user(user)}
 
 
 @router.get("/operations")

@@ -1,11 +1,13 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
 import { ArrowRight, Eye, EyeOff, KeyRound, LogOut, MailCheck, ShieldCheck, UserRound } from 'lucide-react'
 import { API_BASE, clearUserSessionToken, saveUserSessionToken, userSessionToken } from './api'
+import AdminPanel from './AdminPanel'
 import './auth.css'
 
 type User = { id:string; email:string; display_name:string; role:string; active:boolean; email_verified?:boolean }
 type Session = { user:User }
 type Mode = 'login'|'register'|'forgot'|'reset'|'verify'
+type ProfileData = {user:User;profile?:{full_name?:string;preferences?:Record<string,unknown>};subscription?:{plan?:string;status?:string;currentPeriodStart?:string;currentPeriodEnd?:string}}
 
 function detail(payload:unknown):string {
   if (payload && typeof payload === 'object' && 'detail' in payload) {
@@ -29,10 +31,24 @@ function strength(password:string):{label:string;score:number} {
   return {score, label:score < 2 ? 'Zayıf' : score < 4 ? 'Orta' : 'Güçlü'}
 }
 
+function ProfileSettings({token,user,onLogout}:{token:string;user:User;onLogout:()=>void}) {
+  const [data,setData] = useState<ProfileData|null>(null)
+  const [name,setName] = useState(user.display_name)
+  const [passwords,setPasswords] = useState({current_password:'',new_password:''})
+  const [notice,setNotice] = useState('')
+  const [busy,setBusy] = useState(false)
+  const call = async <T,>(path:string,options:RequestInit = {}):Promise<T> => { const headers = new Headers(options.headers); headers.set('Authorization',`Bearer ${token}`); if (options.body) headers.set('Content-Type','application/json'); const response = await fetch(`${API_BASE}/v22${path}`,{...options,headers}); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(detail(payload)); return payload as T }
+  useEffect(() => { void call<ProfileData>('/profile').then(value => {setData(value);setName(value.profile?.full_name || value.user.display_name)}).catch(error => setNotice(error instanceof Error ? error.message : 'Profil yüklenemedi.')) },[])
+  const saveProfile = async () => { setBusy(true); try { await call('/profile',{method:'PATCH',body:JSON.stringify({display_name:name,preferences:data?.profile?.preferences || {}})}); setNotice('Profil güncellendi.') } catch (error) {setNotice(error instanceof Error ? error.message : 'Profil güncellenemedi.')} finally {setBusy(false)} }
+  const changePassword = async () => { setBusy(true); try { await call('/auth/change-password',{method:'POST',body:JSON.stringify(passwords)}); setPasswords({current_password:'',new_password:''}); setNotice('Parola güncellendi. Güvenlik için tekrar giriş yapın.'); setTimeout(onLogout,700) } catch (error) {setNotice(error instanceof Error ? error.message : 'Parola güncellenemedi.')} finally {setBusy(false)} }
+  const deleteAccount = async () => { if (!window.confirm('Hesabınız kapatılacak ve tüm oturumlarınız sonlandırılacak. Devam edilsin mi?')) return; setBusy(true); try { await call('/profile',{method:'DELETE'}); onLogout() } catch (error) {setNotice(error instanceof Error ? error.message : 'Hesap kapatılamadı.')} finally {setBusy(false)} }
+  return <main className="profilePage"><header className="profileHeader"><div><span>ACCOUNT / SETTINGS</span><h1>Profile &amp; Settings</h1><p>Kimlik, güvenlik ve üyelik durumunuzu yönetin.</p></div><button onClick={onLogout}><LogOut/> Çıkış</button></header>{notice && <p className="profileNotice">{notice}</p>}<div className="profileGrid"><section className="profileCard"><span>PROFILE</span><h2>Personal details</h2><label>Full name<input value={name} onChange={event => setName(event.target.value)}/></label><label>Email<input value={user.email} readOnly/></label><div className="profileVerified"><MailCheck/> {user.email_verified === false ? 'Email verification required' : 'Email verified'}</div><button disabled={busy} onClick={() => void saveProfile()}>SAVE PROFILE</button></section><section className="profileCard"><span>SECURITY</span><h2>Change password</h2><label>Current password<input type="password" value={passwords.current_password} onChange={event => setPasswords({...passwords,current_password:event.target.value})}/></label><label>New password<input type="password" value={passwords.new_password} onChange={event => setPasswords({...passwords,new_password:event.target.value})}/></label><button disabled={busy} onClick={() => void changePassword()}>UPDATE PASSWORD</button><p className="profileMuted">Session: signed bearer token · {user.role === 'OWNER' ? 'Admin' : 'Member'}</p></section><section className="profileCard"><span>SUBSCRIPTION</span><h2>Current membership</h2><div className="profileFacts"><b>Plan <strong>{data?.subscription?.plan || 'FREE'}</strong></b><b>Status <strong>{data?.subscription?.status || 'inactive'}</strong></b><b>Started <strong>{data?.subscription?.currentPeriodStart ? new Date(data.subscription.currentPeriodStart).toLocaleDateString('tr-TR') : '—'}</strong></b><b>Expires <strong>{data?.subscription?.currentPeriodEnd ? new Date(data.subscription.currentPeriodEnd).toLocaleDateString('tr-TR') : '—'}</strong></b></div></section><section className="profileCard profileDanger"><span>ACCOUNT</span><h2>Close account</h2><p>Hesap kapatıldığında oturumlar geçersiz kılınır ve erişim durdurulur.</p><button disabled={busy || user.role === 'OWNER'} onClick={() => void deleteAccount()}>DELETE ACCOUNT</button></section></div></main>
+}
+
 export default function AuthGate({children}:{children:ReactNode}) {
   const [token,setToken] = useState(userSessionToken())
   const [session,setSession] = useState<Session|null>(null)
-  const [mode,setMode] = useState<Mode>(() => window.location.pathname === '/register' ? 'register' : window.location.pathname === '/forgot-password' ? 'forgot' : window.location.pathname === '/reset-password' ? 'reset' : 'login')
+  const [mode,setMode] = useState<Mode>(() => window.location.pathname === '/register' ? 'register' : window.location.pathname === '/forgot-password' ? 'forgot' : window.location.pathname === '/reset-password' ? 'reset' : window.location.pathname === '/verify-email' ? 'verify' : 'login')
   const [busy,setBusy] = useState(true)
   const [message,setMessage] = useState('Oturum doğrulanıyor…')
   const [showPassword,setShowPassword] = useState(false)
@@ -109,6 +125,10 @@ export default function AuthGate({children}:{children:ReactNode}) {
     </main>
   }
 
-  if (window.location.pathname.startsWith('/admin') && session.user.role !== 'OWNER') return <main className="authLoading"><div className="authLoader"><ShieldCheck/><b>403 · ERİŞİM YOK</b><span>Bu alan yalnızca yönetici hesaplarına açıktır.</span><button onClick={() => {history.replaceState(null,'','/dashboard'); location.reload()}}>Dashboard'a dön</button></div></main>
-  return <><div className="authSessionBar"><span><ShieldCheck/> {session.user.display_name} <b>{session.user.role === 'OWNER' ? 'ADMIN' : 'MEMBER'}</b></span><button onClick={() => void logout()}><LogOut/> Çıkış</button></div>{children}</>
+  const path = window.location.pathname
+  if (['/login','/register','/forgot-password','/reset-password','/verify-email'].includes(path)) { history.replaceState(null,'','/dashboard') }
+  if (path.startsWith('/admin') && session.user.role !== 'OWNER') return <main className="authLoading"><div className="authLoader"><ShieldCheck/><b>403 · ERİŞİM YOK</b><span>Bu alan yalnızca yönetici hesaplarına açıktır.</span><button onClick={() => {history.replaceState(null,'','/dashboard'); location.reload()}}>Dashboard'a dön</button></div></main>
+  if (path.startsWith('/admin')) return <><div className="authSessionBar"><span><ShieldCheck/> {session.user.display_name} <b>ADMIN</b></span><button onClick={() => void logout()}><LogOut/> Çıkış</button></div><AdminPanel token={token} onBack={() => {history.replaceState(null,'','/dashboard');location.reload()}}/></>
+  if (path.startsWith('/settings')) return <><div className="authSessionBar"><span><ShieldCheck/> {session.user.display_name} <b>{session.user.role === 'OWNER' ? 'ADMIN' : 'MEMBER'}</b></span><button onClick={() => void logout()}><LogOut/> Çıkış</button></div><ProfileSettings token={token} user={session.user} onLogout={() => void logout()}/></>
+  return <><div className="authSessionBar"><span><ShieldCheck/> {session.user.display_name} <b>{session.user.role === 'OWNER' ? 'ADMIN' : 'MEMBER'}</b></span>{session.user.role === 'OWNER' && <button onClick={() => {location.assign('/admin')}}><ShieldCheck/> Admin Dashboard</button>}<button onClick={() => {location.assign('/settings')}}><UserRound/> Profile</button><button onClick={() => void logout()}><LogOut/> Çıkış</button></div>{children}</>
 }
