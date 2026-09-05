@@ -106,8 +106,8 @@ export default function AuthGate({children}:{children:ReactNode}) {
           saveUserSessionToken(result.token,remember); setToken(result.token); setSession({user:result.user})
         }
       } else if (mode === 'register') {
-        const result = await request<{development_verification_token?:string;message:string}>('/auth/register',{method:'POST',body:JSON.stringify(register)})
-        setEmail(register.email); setResetToken(result.development_verification_token || ''); setMode('verify'); setMessage(result.message)
+        const result = await request<{verification_status_token?:string;message:string}>('/auth/register',{method:'POST',body:JSON.stringify(register)})
+        setEmail(register.email); setResetToken(result.verification_status_token || ''); setMode('verify'); setMessage(result.message)
       } else if (mode === 'forgot') {
         const result = await request<{development_reset_token?:string;message:string}>('/auth/forgot-password',{method:'POST',body:JSON.stringify({email})})
         if (result.development_reset_token) setResetToken(result.development_reset_token)

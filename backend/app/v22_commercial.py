@@ -710,6 +710,7 @@ async def v22_register(payload: RegisterRequest, request: Request):
         state["profiles"].append({"id": uuid.uuid4().hex, "user_id": user_id, "full_name": user["display_name"], "avatar_url": None, "role": "user", "preferences": {}, "created_at": user["created_at"], "updated_at": user["created_at"]})
         state["subscriptions"].append({"id": uuid.uuid4().hex, "user_id": user_id, "plan": "FREE", "status": "inactive", "started_at": user["created_at"], "expires_at": None, "created_at": user["created_at"], "updated_at": user["created_at"]})
         verification_token = issue_one_time_token(state, user, rt["secret"], kind="EMAIL_VERIFY")
+        verification_status_token = issue_token(user_id, user["role"], rt["secret"], kind="EMAIL_STATUS", ttl_seconds=24 * 60 * 60)
         add_audit(state, "USER_REGISTERED", "Yeni kullanıcı hesabı oluşturuldu.", actor=user_id, subject=user_id)
         save_state(state)
     await persist_v22_commercial(request.app)
@@ -726,7 +727,7 @@ async def v22_register(payload: RegisterRequest, request: Request):
                 save_state(rt["state"])
             await persist_v22_commercial(request.app)
             raise HTTPException(503, "Doğrulama e-postası gönderilemedi; SMTP ayarlarını kontrol edin") from exc
-    response: dict[str, Any] = {"user": public_user(user), "message": "Hesabınız oluşturuldu. E-postanızı doğrulayın.", "email_verification_required": True}
+    response: dict[str, Any] = {"user": public_user(user), "message": "Hesabınız oluşturuldu. E-postanızı doğrulayın.", "email_verification_required": True, "verification_status_token": verification_status_token}
     if expose_dev_token:
         response["development_verification_token"] = verification_token
     return response
@@ -749,7 +750,10 @@ async def v22_verify_email(payload: EmailTokenRequest, request: Request):
 async def v22_verification_status(request: Request, token: str = Query(..., min_length=20, max_length=600)):
     rt = runtime(request)
     try:
-        payload = verify_token(token, rt["secret"], expected_kind="EMAIL_VERIFY")
+        try:
+            payload = verify_token(token, rt["secret"], expected_kind="EMAIL_STATUS")
+        except ValueError:
+            payload = verify_token(token, rt["secret"], expected_kind="EMAIL_VERIFY")
     except ValueError as exc:
         raise HTTPException(400, "Geçersiz veya süresi dolmuş doğrulama bağlantısı") from exc
     user = next((item for item in rt["state"]["users"] if item.get("id") == payload["sub"]), None)

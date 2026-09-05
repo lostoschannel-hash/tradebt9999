@@ -41,7 +41,7 @@ class V22CommercialTests(unittest.TestCase):
     def test_verification_status_reads_without_consuming_token(self):
         secret = b"verification-status-test-secret-long-enough"
         user = {"id": "user-1", "role": "CUSTOMER", "email_verified": False}
-        token = issue_token(user["id"], user["role"], secret, kind="EMAIL_VERIFY", now=int(time.time()), ttl_seconds=3_600)
+        token = issue_token(user["id"], user["role"], secret, kind="EMAIL_STATUS", now=int(time.time()), ttl_seconds=3_600)
         application = SimpleNamespace(state=SimpleNamespace(v22_commercial={"secret": secret, "state": {"users": [user]}}))
         request = SimpleNamespace(app=application)
         self.assertEqual(asyncio.run(v22_verification_status(request, token)), {"verified": False})
