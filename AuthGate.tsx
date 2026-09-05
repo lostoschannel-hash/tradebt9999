@@ -22,13 +22,27 @@ async function request<T>(path:string, options:RequestInit = {}):Promise<T> {
   if (options.body) headers.set('Content-Type','application/json')
   const response = await fetch(`${API_BASE}/v22${path}`, {...options, headers})
   const payload = await response.json().catch(() => null)
-  if (!response.ok) throw new Error(detail(payload))
+  if (!response.ok) {
+    if (response.status === 409) throw new Error('Bu e-posta adresiyle zaten bir hesap bulunuyor.')
+    if (response.status >= 500) throw new Error('Sunucuda geçici bir sorun oluştu. Lütfen biraz sonra tekrar deneyin.')
+    throw new Error(detail(payload))
+  }
   return payload as T
 }
 
 function strength(password:string):{label:string;score:number} {
   const score = [password.length >= 10, /[A-Z]/.test(password), /\d/.test(password), /[^A-Za-z0-9]/.test(password)].filter(Boolean).length
   return {score, label:score < 2 ? 'Zayıf' : score < 4 ? 'Orta' : 'Güçlü'}
+}
+
+function passwordRules(password:string) {
+  return [
+    ['En az 10 karakter', password.length >= 10],
+    ['Büyük harf', /[A-Z]/.test(password)],
+    ['Küçük harf', /[a-z]/.test(password)],
+    ['Rakam', /\d/.test(password)],
+    ['Sembol', /[^A-Za-z0-9]/.test(password)],
+  ] as const
 }
 
 function ProfileSettings({token,user,onLogout}:{token:string;user:User;onLogout:()=>void}) {
@@ -62,6 +76,9 @@ export default function AuthGate({children}:{children:ReactNode}) {
   const [verificationStatusToken,setVerificationStatusToken] = useState('')
   const [verificationInput,setVerificationInput] = useState('')
   const [resetPassword,setResetPassword] = useState({password:'',confirm_password:''})
+  const [fieldErrors,setFieldErrors] = useState<Record<string,string>>({})
+  const [termsError,setTermsError] = useState('')
+  const [verificationNotice,setVerificationNotice] = useState(false)
   const autoVerificationStarted = useRef(false)
   const [autoVerifying,setAutoVerifying] = useState(false)
 
@@ -113,8 +130,31 @@ export default function AuthGate({children}:{children:ReactNode}) {
     return () => { active = false }
   },[mode,verificationLinkToken,verificationStatusToken])
 
+  const validateForm = ():boolean => {
+    const errors:Record<string,string> = {}
+    const emailValue = mode === 'login' ? login.email : mode === 'register' || mode === 'forgot' ? (mode === 'register' ? register.email : email) : ''
+    if (mode === 'login' || mode === 'register' || mode === 'forgot') {
+      if (!emailValue.trim()) errors.email = 'E-posta adresinizi girin.'
+      else if (!/^\S+@\S+\.\S+$/.test(emailValue)) errors.email = 'Lütfen geçerli bir e-posta adresi girin.'
+    }
+    if (mode === 'login' && !login.password) errors.password = 'Şifrenizi girin.'
+    if (mode === 'register') {
+      if (!register.password) errors.password = 'Şifrenizi girin.'
+      else if (!passwordRules(register.password).every(([,passed]) => passed)) errors.password = 'Şifreniz tüm güvenlik şartlarını karşılamıyor.'
+      if (!register.confirm_password) errors.confirm_password = 'Şifrenizi tekrar girin.'
+      else if (register.password !== register.confirm_password) errors.confirm_password = 'Şifreler eşleşmiyor.'
+      if (!register.terms_accepted) setTermsError('Devam etmek için kullanım koşullarını ve gizlilik politikasını kabul etmelisiniz.')
+      else setTermsError('')
+    }
+    if (mode === 'verify' && !verificationInput && !verificationStatusToken && !verificationLinkToken) errors.verification = 'Doğrulama kodunu girin.'
+    setFieldErrors(errors)
+    return !Object.keys(errors).length && (mode !== 'register' || register.terms_accepted)
+  }
+
   const submit = async (event:FormEvent) => {
-    event.preventDefault(); setBusy(true); setMessage('')
+    event.preventDefault()
+    if (!validateForm()) return
+    setBusy(true); setMessage('')
     try {
       if (mode === 'login') {
         const result = await request<{token:string;user:User}>('/auth/login',{method:'POST',body:JSON.stringify({...login,remember})})
@@ -125,7 +165,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
         }
       } else if (mode === 'register') {
         const result = await request<{verification_status_token?:string;message:string}>('/auth/register',{method:'POST',body:JSON.stringify(register)})
-        setEmail(register.email); setVerificationStatusToken(result.verification_status_token || ''); setVerificationInput(''); setMode('verify'); setMessage(result.message)
+        setEmail(register.email); setVerificationStatusToken(result.verification_status_token || ''); setVerificationInput(''); setVerificationNotice(true); setMode('verify'); setMessage(result.message)
       } else if (mode === 'forgot') {
         const result = await request<{development_reset_token?:string;message:string}>('/auth/forgot-password',{method:'POST',body:JSON.stringify({email})})
         if (result.development_reset_token) setResetToken(result.development_reset_token)
@@ -135,7 +175,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
         setMessage('Parolanız güncellendi. Giriş yapabilirsiniz.'); setMode('login')
       } else {
         await request('/auth/verify-email',{method:'POST',body:JSON.stringify({token:verificationInput})})
-        setMessage('E-posta doğrulandı. Şimdi giriş yapabilirsiniz.'); setMode('login')
+        setVerificationNotice(false); setMessage('E-posta doğrulandı. Şimdi giriş yapabilirsiniz.'); setMode('login')
       }
     } catch (error) { setMessage(error instanceof Error ? error.message : 'İşlem başarısız.') }
     finally { setBusy(false) }
@@ -154,11 +194,12 @@ export default function AuthGate({children}:{children:ReactNode}) {
       <section className="authIntro"><span className="authEyebrow">PROTREBOT / SECURE ACCESS</span><h1>Trading operasyonunuz için sakin, kontrollü bir çalışma alanı.</h1><p>Demo, analiz ve risk araçları tek bir güvenli oturumla korunur. Gerçek Binance emri bu authentication katmanı tarafından gönderilmez.</p><div className="authProof"><span><ShieldCheck/> Backend doğrulamalı</span><span><KeyRound/> Scrypt parola koruması</span><span><MailCheck/> E-posta kontrollü</span></div></section>
       <section className="authCard">
         <div className="authCardHead"><div className="authMark"><UserRound/></div><div><span>MEMBER ACCESS</span><h2>{mode === 'login' ? 'Hesabınıza giriş yapın' : mode === 'register' ? 'Yeni hesap oluşturun' : mode === 'forgot' ? 'Parolanızı yenileyin' : mode === 'reset' ? 'Yeni parola belirleyin' : 'E-postanızı doğrulayın'}</h2></div></div>
+        {mode === 'verify' && verificationNotice && <div className="authVerificationNotice"><b>Doğrulama bağlantısı e-posta adresinize gönderildi.</b><span>Gelen kutunuzda göremiyorsanız lütfen Spam / Gereksiz / Tanıtımlar klasörünüzü de kontrol edin.</span><small>Doğrulama bağlantısını açtığınızda bu sayfa otomatik olarak güncellenecektir.</small></div>}
         <form onSubmit={submit}>
-          {mode === 'login' && <><label>E-posta<input type="email" required autoComplete="username" value={login.email} onChange={event => setLogin({...login,email:event.target.value})} placeholder="siz@ornek.com"/></label><label>Parola<div className="authPassword"><input required type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={login.password} onChange={event => setLogin({...login,password:event.target.value})}/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label="Parolayı göster veya gizle">{showPassword ? <EyeOff/> : <Eye/>}</button></div></label><label className="authCheck"><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)}/><span>Bu cihazda oturumu hatırla</span></label></>}
-          {mode === 'register' && <><label>Ad soyad<input required autoComplete="name" value={register.display_name} onChange={event => setRegister({...register,display_name:event.target.value})} placeholder="Ada Yılmaz"/></label><label>E-posta<input required type="email" autoComplete="email" value={register.email} onChange={event => setRegister({...register,email:event.target.value})} placeholder="siz@ornek.com"/></label><label>Parola<div className="authPassword"><input required type={showPassword ? 'text' : 'password'} autoComplete="new-password" value={register.password} onChange={event => setRegister({...register,password:event.target.value})}/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label="Parolayı göster veya gizle">{showPassword ? <EyeOff/> : <Eye/>}</button></div><div className={`passwordMeter strength${registrationStrength.score}`}><i style={{width:`${registrationStrength.score * 25}%`}}/><span>{registrationStrength.label} · en az 10 karakter, büyük harf, sayı ve sembol kullanın</span></div></label><label>Parola tekrar<input required type="password" autoComplete="new-password" value={register.confirm_password} onChange={event => setRegister({...register,confirm_password:event.target.value})}/></label><label className="authCheck"><input type="checkbox" checked={register.terms_accepted} onChange={event => setRegister({...register,terms_accepted:event.target.checked})}/><span>Kullanım koşullarını ve gizlilik politikasını kabul ediyorum.</span></label></>}
+          {mode === 'login' && <><label className={fieldErrors.email ? 'authFieldError' : ''}>E-posta<input type="email" required autoComplete="username" value={login.email} onChange={event => {setLogin({...login,email:event.target.value});setFieldErrors(current => ({...current,email:''}))}} placeholder="siz@ornek.com"/>{fieldErrors.email && <em>{fieldErrors.email}</em>}</label><label className={fieldErrors.password ? 'authFieldError' : ''}>Parola<div className="authPassword"><input required type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={login.password} onChange={event => {setLogin({...login,password:event.target.value});setFieldErrors(current => ({...current,password:''}))}}/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label="Parolayı göster veya gizle">{showPassword ? <EyeOff/> : <Eye/>}</button></div>{fieldErrors.password && <em>{fieldErrors.password}</em>}</label><label className="authCheck"><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)}/><span>Bu cihazda oturumu hatırla</span></label></>}
+          {mode === 'register' && <><label>Ad soyad<input required autoComplete="name" value={register.display_name} onChange={event => setRegister({...register,display_name:event.target.value})} placeholder="Ada Yılmaz"/></label><label className={fieldErrors.email ? 'authFieldError' : ''}>E-posta<input type="email" autoComplete="email" value={register.email} onChange={event => {setRegister({...register,email:event.target.value});setFieldErrors(current => ({...current,email:''}))}} placeholder="siz@ornek.com"/>{fieldErrors.email && <em>{fieldErrors.email}</em>}</label><label className={fieldErrors.password ? 'authFieldError' : ''}>Parola<div className="authPassword"><input type={showPassword ? 'text' : 'password'} autoComplete="new-password" value={register.password} onChange={event => {setRegister({...register,password:event.target.value});setFieldErrors(current => ({...current,password:''}))}}/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label="Parolayı göster veya gizle">{showPassword ? <EyeOff/> : <Eye/>}</button></div><div className={`passwordMeter strength${registrationStrength.score}`}><i style={{width:`${registrationStrength.score * 20}%`}}/><span>{registrationStrength.label} · tüm şartlar sağlanmalı</span></div><div className="passwordRules">{passwordRules(register.password).map(([label,passed]) => <span className={passed ? 'passed' : 'missing'} key={label}>{passed ? '✓' : '•'} {label}</span>)}</div>{fieldErrors.password && <em>{fieldErrors.password}</em>}</label><label className={fieldErrors.confirm_password ? 'authFieldError' : ''}>Parola tekrar<input type="password" autoComplete="new-password" value={register.confirm_password} onChange={event => {setRegister({...register,confirm_password:event.target.value});setFieldErrors(current => ({...current,confirm_password:''}))}}/>{fieldErrors.confirm_password && <em>{fieldErrors.confirm_password}</em>}</label><label className={`authCheck ${termsError ? 'authCheckError' : ''}`}><input type="checkbox" checked={register.terms_accepted} onChange={event => {setRegister({...register,terms_accepted:event.target.checked});setTermsError('')}}/><span>Kullanım koşullarını ve gizlilik politikasını kabul ediyorum.</span></label>{termsError && <p className="authInlineError">{termsError}</p>}</>}
           {mode === 'forgot' && <label>E-posta<input required type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="siz@ornek.com"/><small>Kayıtlıysa yenileme bağlantısı hazırlanır.</small></label>}
-          {mode === 'verify' && <label>Doğrulama kodu<input required value={verificationInput} onChange={event => setVerificationInput(event.target.value)} placeholder="E-posta doğrulama kodu"/><small>{message || 'Kayıt sonrası e-postanızdaki kodu girin.'}</small></label>}
+          {mode === 'verify' && <label className={fieldErrors.verification ? 'authFieldError' : ''}>Doğrulama kodu<input required value={verificationInput} onChange={event => {setVerificationInput(event.target.value);setFieldErrors(current => ({...current,verification:''}))}} placeholder="E-posta doğrulama kodu"/><small>{message || 'Kayıt sonrası e-postanızdaki kodu girin.'}</small>{fieldErrors.verification && <em>{fieldErrors.verification}</em>}</label>}
           {mode === 'reset' && <><label>Doğrulama kodu<input required value={resetToken} onChange={event => setResetToken(event.target.value)}/></label><label>Yeni parola<input required type="password" autoComplete="new-password" value={resetPassword.password} onChange={event => setResetPassword({...resetPassword,password:event.target.value})}/></label><label>Yeni parola tekrar<input required type="password" autoComplete="new-password" value={resetPassword.confirm_password} onChange={event => setResetPassword({...resetPassword,confirm_password:event.target.value})}/></label></>}
           <button className="authSubmit" disabled={busy}>{busy ? 'İŞLENİYOR…' : mode === 'login' ? 'GÜVENLİ GİRİŞ' : mode === 'register' ? 'HESAP OLUŞTUR' : mode === 'forgot' ? 'YENİLEME BAĞLANTISI GÖNDER' : mode === 'reset' ? 'PAROLAYI GÜNCELLE' : 'E-POSTAYI DOĞRULA'}<ArrowRight/></button>
         </form>
